@@ -1,8 +1,4 @@
 KERNELDIR=../../../
-CROSS = arm_v5t_le-
-CC=		$(CROSS)gcc
-LD=		$(CROSS)ld
-STRIP = $(CROSS)strip
 
 DEBUG = n 
 
