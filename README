@@ -1,14 +1,17 @@
 (These are notes about the WM8505 kernel port, please see readme.linux
 for the original linux readme.txt.)
 
-* This port is based on kernel 2.6.29 sources released by VIA.
+* This is based on kernel 2.6.29 sources released by VIA
+  (http://lists.gpl-violations.org/pipermail/legal/2010-July/002204.html).
 
-* The sources currently do not include some binary object files (under via_obj.arm_v5t-2629.01) but we're hoping that will change.
+* The sources currently come with some sourceless binary object files
+  (under via_obj.arm_v5t-2629.01) but we're hoping that will change.
 
 
 ******** PREREQUISITES ********
 
-- Appropriate ARM cross-compiler toolchain (I've been using Emdebian's but you can use whatever you want.)
+- Appropriate ARM cross-compiler toolchain (I've been using Emdebian's
+  but you can use whatever you want.)
 
 
 ******** CONFIG **********
@@ -19,14 +22,24 @@ make menuconfig ARCH=arm
 Pre-existing configs are:
 
 * arch/arm/configs/android_wm8505_config
-* arch/arm/configs/wm8505_initial_config
 * arch/arm/configs/wmt_defconfig
 
-  All came with the source tarball.
+  These two came like this with the source tarball.
+
+* arch/arm/configs/wm8505_initial_config
+
+  This file was the .config in the source tarball (different to the
+  above two configs.)
 
 * arch/arm/configs/eken_m001_factory_configuration
   
-  /proc/config.gz on a factory Eken M001 kernel.
+  From /proc/config.gz on a factory Eken M001 kernel.
+
+* arch/arm/configs/eken_m001_debian
+
+  Currently just the factory Android kernel plus fbcon.ko
+  ("Framebuffer Console"), minus ANDROID_PARANOID_NETWORKING ("Only
+  allow certain groups to create sockets)
 
 
 ******** BUILDING ********
@@ -37,7 +50,8 @@ Pre-existing configs are:
 
   make ubin modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
 
-This builds a uzImage.bin for uboot. Replace CROSS_COMPILE with your x-compiler as appropriate.
+This builds a uzImage.bin for uboot. Replace CROSS_COMPILE with your
+x-compiler as appropriate.
 
   make modules_install ARCH=arm INSTALL_MOD_PATH=/some/staging/path
 
@@ -72,4 +86,10 @@ WMT "special" args:
 * lcdid=1 enables VOUT to LCD on tablets. Some other machines
   (netbooks?) use VT1632 which is the default if lcdid is not set (in
   this case, you won't see any video on a tablet.)
+
+
+***** random notes *****
+
+* RT3070 USB Wifi driver is not in kernel tree (compiled separately)
+
 
