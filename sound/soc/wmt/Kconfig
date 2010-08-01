@@ -1,0 +1,17 @@
+config SND_WMT_AC97
+	tristate "AC97 Audio for the WMT chip"
+	depends on ARCH_WMT && SND
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the WMT AC97 interface. You will also need to select the audio 
+	  interfaces to support below.
+
+config SND_WMT_I2S
+	tristate "I2S Audio for the WMT chip"
+	depends on ARCH_WMT && SND
+	help
+	  Say Y or M if you want to add support for codecs attached to
+	  the WMT I2S interface. You will also need to select the audio 
+	  interfaces to support below.
+
+

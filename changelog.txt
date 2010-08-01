@@ -1,0 +1,645 @@
+---------------------------------------------------------------------------------
+SimenXie 2010-3-16
+1.
+change file:
+drivers/misc/pmem.c
+comment:
+change FB_VRAM_SIZE from 0x400000 to 0x600000, match video driver
+2.
+change file:
+drivers/usb/gadget/Kconfig
+comment:
+fix issue of can't show android gadget
+3.
+change file:
+drivers/video/wmt/vout-wm8510.c
+comment:
+mask read parameter for spi flash to VGA debug
+---------------------------------------------------------------------------------
+VicYuan  2010-3-16 10:33
+1. Add a /init.sh to fix the first time compile problem.
+---------------------------------------------------------------------------------
+SimenXie 2010-3-16 10:41
+1.
+change file:
+drivers/char/Kconfig
+comment:
+delete WMT_RTC
+2.
+change file:
+drivers/char/Makefile
+comment:
+delete WMT_RTC
+
+---------------------------------------------------------------------------------
+VicYuan 2010-3-17 10:15
+1. Add /readme.txt to discribe the boot arguments.
+
+---------------------------------------------------------------------------------
+SimenXie 2010-3-18 11:42
+1.
+change file:
+drivers/video/wmt/lcd.h
+drivers/video/wmt/Makefile
+add file:
+drivers/video/wmt/lcd-at080tn52.c
+drivers/video/wmt/lcd-KD101N1-24NAV1.c
+comment:
+add lcd driver
+
+---------------------------------------------------------------------------------
+HangYan 2010-3-18 14:03
+To support read and wirte u-boot argument 
+
+added files:
+/drivers/mtd/devices/wmt_sf.c
+/drivers/mtd/devices/wmt_sf.h
+/drivers/mtd/devices/wmt_sf_ids.c
+/drivers/mtd/devices/Makefile
+/drivers/mtd/devices/Kconfig
+change files:
+/.config
+/drivers/mtd/Makefile     nand partition is loaded before SF partition
+---------------------------------------------------------------------------------
+
+VicYuan 2010-3-22 16:33 
+Fixed the SPI init crash problem in RDK
+changed files:
+1. /drivers/mtd/devices/wmt_sf.c
+2. /drivers/mtd/devices/Kconfig
+comments:
+ turn on PWM SPI clock when probe
+ change SPI init order, make it run firstly before other module_init
+ change Kconfig to make this driver must build-in and can't be build as module.
+---------------------------------------------------------------------------------
+
+luiszhou 2010-3-22
+Make MB driver to mknod /dev/mbdev automatelly
+change file:
+arch/arm/mach-wmt/memblock.c
+
+---------------------------------------------------------------------------------
+Howayhuo 2010-3-23 19:27
+Change the process bar to new style
+Change file:
+drivers\video\wmt\processbar\processbar-slide.c
+drivers\video\wmt\processbar\colorbar-slide-888.h
+drivers\video\wmt\processbar\backgroundbar-slide-888.h
+
+---------------------------------------------------------------------------------
+
+RandolphHan 2010-3-25 15:00
+Update Touch and Battery Driver
+Change file:
+drivers\input\touchscreen\wm9715-ts_800_480.c
+drivers\input\touchscreen\wmt_battery.c
+comments:
+Add ENV touchic(true or false) and touchirq(gpio5 or gpio4) for diff board.
+Add ENV battvoltlist for battery discharge curve percent display. 
+
+
+---------------------------------------------------------------------------------
+VicYuan 2010-3-26 19:18
+1. 
+change file:
+    arch\arm\mach-wmt\memblock.c 
+comment:
+    Fix the wrong current task problem when program exits
+2. 
+change file:
+    drivers\video\wmt\ge_accel.c
+comment:
+    Remove unused SW cursor code and fix the layer lock timeout issue.
+
+---------------------------------------------------------------------------------
+HangYan 2010-3-27 12:27
+Update keypad driver
+change file:
+	\drivers\input\keyboard\Makefile
+Add directory:
+	\drivers\input\keyboard\wmt_kpad
+
+---------------------------------------------------------------------------------
+HangYan 2010-3-29 21:15
+change file:
+	\drivers\input\keyboard\wmt_kpad\wms8070a_kpad.c
+comment:
+	Add one timer to init hardward.
+
+        
+---------------------------------------------------------------------------------
+KevinGuan 2010-3-30 10:54
+change file:
+	\driver\usb\gadget\epautoconf.c
+	\driver\usb\gadget\usbstring
+	\driver\usb\gadget\config.c
+	\driver\usb\gadget\udc_wmt.c
+	\include\linux\usb\gadget.h
+comment:
+	Add usb gadget mass storage
+
+---------------------------------------------------------------------------------
+KevinGuan 2010-3-30 14:43
+change file:
+	\sound\arm\wmt_ac97.c
+comment:
+	Add audio mic&linein mute ctrl in sound driver
+
+---------------------------------------------------------------------------------
+HangYan 2010-3-31 10:00
+change file:
+	\drivers\input\keyboard\wmt_kpad\wmt_keypadall.c
+comment:
+	Change hardware initial sequence.
+
+---------------------------------------------------------------------------------
+KevinGuan 2010-3-31 14:17
+add file:
+	\driver\usb\host\ehci-sched.c
+comment:
+	enable CONFIG_USB_EHCI_TT_NEWSCHED,fix for usb bluetooth conflict with usb keyboard	
+---------------------------------------------------------------------------------
+HowayHuo 2010-3-31 15:00
+Modify following files for suspend:
+1. common\arch\arm\include\asm\mach\dma.h
+comment: 
+    Add some DMA setting for SPI
+2. arch\arm\include\asm\dma.h
+comment:
+   include <asm/mach/dma.h> 
+3. arch\arm\mach-wmt\include\mach\vt1613.h
+comment:
+   define some new vt1613 register
+4. arch\arm\mach-wmt\generic.c
+comment:
+    add some hibernation code
+5. arch\arm\mach-wmt\memblock.c
+comment:
+    use platform_device_register() to register the driver
+6. arch\arm\mach-wmt\pm.c
+comment:
+    replace it using BSP0.9.1 version
+7. arch\arm\mach-wmt\pm_cpai.c
+comment:
+    replace it using BSP0.9.1 version
+8.  drivers\base\platform.c
+comment:
+    show the suspend driver name which be registed the platform bus
+9. drivers\char\wmt-pwm.c
+comment:
+    read the PWM scarlar/period/duty from u-boot parameter "pwmparam"
+10. drivers\char\wmt-pwm.h
+comment:
+    change the PWM_PERIOD_VAL to a static glabal variable
+11. drivers\input\serio\i8042_wm8510.c
+comment:
+    use platform_device_register() to register the driver
+12. drivers\input\touchscreen\wm9715-ts_800_480.c
+comment:
+    use platform_device_register() register the driver
+13. drivers\mmc\core\core.c
+comment:
+    delay some times to rescan when SD/MMC resume
+14. drivers\mmc\host\mmc_atsmb.c
+comment:
+    use platform_device_register() to register the driver
+
+15. drivers\mtd\devices\wmt_sf.c
+comment:
+    use platform_device_register() to register the driver
+16. drivers\mtd\nand\nand_ids.c
+comment:
+    modify the parameter of Samsung Nand K9GAG08U0M
+17. drivers\mtd\nand\wmt_nand.c
+comment:
+    use platform_device_register() to register the driver
+18. drivers\rtc\wmt-rtc.c
+comment:
+    remove the suspend and resume function
+19. drivers\serial\serial_wmt.c
+comment:
+    use platform_device_register() to register the driver
+    modify the suspend and resume function according BSP0.9.1
+20. drivers\usb\gadget\udc_wmt.c
+comment:
+    use platform_device_register() to register the driver
+21. drivers\video\wmt\fb-vpu.c
+comment:
+    use platform_device_register() to register the driver
+22. drivers\video\wmt\ge_main.c
+comment:
+    use platform_device_register() to register the driver
+23. drivers\video\wmt\lcd-CHIHSIN-LW700AT9005.c
+comment:
+    Add the file to support CHIHSIN LCD LW700AT9005
+24. drivers\video\wmt\lcd.c
+comment:
+    Don't initialize the lcd_blt_level and lcd_blt_frq. They are initialzied in pwm inilization.
+25. drivers\video\wmt\lcd.h
+comment:
+    Add new LCD: CHIHSIN LW700AT9005
+26. drivers\video\wmt\Makefile
+comment:
+    Add new LCD: CHIHSIN LW700AT9005
+27. drivers\video\wmt\vout-wm8510.c
+comment:
+    Add vo_boot_suspend() by samshen
+28. include\linux\serial_core.h
+comment:
+    replace it using BSP0.9.1 version
+29. sound\arm\ac97_vt1613.c
+comment:
+    replace it using BSP0.9.1 version
+30. sound\arm\vt1613_generic.c
+comment:
+    replace it using BSP0.9.1 version
+31. sound\arm\wmt_ac97.c
+comment:
+    replace it using BSP0.9.1 version
+32. drivers\input\touchscreen\wmt_battery.c
+comment:
+    remove debug information
+33. arch\arm\mach-wmt\dma.c
+comment:
+    replace it using BSP0.9.1 version
+
+
+---------------------------------------------------------------------------------
+KevinGuan 2010-4-1 16:12
+modify files:
+	\arch\arm\mach-wmt\include\mach\ac97.h
+	\sound\arm\wmt_ac97.c
+	\sound\arm\ac97_vt1613.c
+comment:
+	modify audio mic&linein mute ctrl in sound driver with BSP0.9.1 version	
+
+---------------------------------------------------------------------------------
+Howayhuo 2010-4-6 15:00
+modify files:
+    drivers\mtd\nand\nand_ids.c
+comment:
+    Support NAND Flash: HYNIX_H27UAG8T2ATR
+---------------------------------------------------------------------------------
+Howayhuo 2010-4-6 15:40
+modify files:
+    \sound\arm\wmt_ac97.c
+comment:
+    enable codec when play audio
+
+---------------------------------------------------------------------------------
+HangYan 2010-4-7 14:01
+modify files:
+	\drivers\char\Kconfig
+	\drivers\char\wmt_vibrate
+comment:
+	Implement the system interface of vibrator.
+
+---------------------------------------------------------------------------------
+HangYan 2010-4-11 21:08
+modify files:
+	\drivers\input\keyboard\wmt_kpad\Makefile-builtin
+	\drivers\input\keyboard\wmt_kpad\readme.txt
+	\drivers\input\keyboard\wmt_kpad\wms8085a_matrix.c
+	\drivers\input\keyboard\wmt_kpad\Makefile
+	\drivers\input\keyboard\wmt_keypadall.c
+comment:
+	Support wms8085a kpad
+---------------------------------------------------------------------------------
+howayhuo 2010-4-13 11:18
+modify files:
+    arch\arm\mach-wmt\gpio-cs.c
+    arch\arm\mach-wmt\include\mach\gpio_if.h
+    drivers\mmc\host\mmc_atsmb.c
+comment:
+    Execute SD power up/down according to U-BOOT GPIO setting
+---------------------------------------------------------------------------------
+howayhuo 2010-4-13 12:25
+modify files:
+    sound\arm\wmt_ac97.c
+comment:
+1. Excute amplify power up/down according to U-BOOT paramerter
+2. modify resume and suspend function
+---------------------------------------------------------------------------------
+Simenxie 2010-4-13 15:29
+modify files:
+    drivers/serial/serial_wmt.c
+comment:
+    mask stuff for UART3 GPIO and modify init UART from 6 to 1
+---------------------------------------------------------------------------------	
+HangYan 2010-4-15 9:41
+modify files:
+	\drivers\input\keyboard\wmt_kpad\Makefile-builtin
+	\drivers\input\keyboard\wmt_kpad\readme.txt
+	\drivers\input\keyboard\wmt_kpad\Makefile
+	\drivers\input\keyboard\wmt_keypadall.c
+	\drivers\input\keyboard\matrix_keypad.c
+	\drivers\input\keyboard\wms8088a_matrix.c
+comment:
+	Support wms8088a kpad and suspend to run.
+---------------------------------------------------------------------------------
+KevinGuan 2010-4-15 14:45
+change file:
+	\sound\arm\wmt_ac97.c
+comment:
+	Add audio beep&phone mute ctrl in sound driver	
+
+---------------------------------------------------------------------------------
+Simenxie 2010-4-15 19:33
+change file:
+	\sound\arm\wmt_ac97.c
+comment:
+	fix record sound issue
+
+change file:
+	drivers\mmc\host\mmc_atsmb.c
+comment:
+	add delay for sd power up
+---------------------------------------------------------------------------------
+HowayHuo 2010-4-15 22:42
+change file:
+    arch/arm/mach-wmt/pm.c
+comment:
+    Don't close backlight when press power button
+change file:
+    drivers/serial/serial_wmt.c
+    drivers/input/touchscreen/wmt_battery.c
+    kernel/power/main.c
+    kernel/power/wakelock.c
+    drivers/mmc/core/core.c
+    drivers/mmc/host/mmc_atsmb.c
+    sound/arm/wmt_ac97.c
+    sound/arm/ac97_vt1613.c
+comment:
+    Modify them for suspend
+Add file:
+    drivers/input/sensor/mma7660.c
+    drivers/input/sensor/Makefile
+comment:
+    Sensor driver which support suspend
+---------------------------------------------------------------------------------
+HangYan 2010-4-16 14:01
+change file:
+	drivers\input\keyboard\wmt_kpad\wms8088a_matrix.c
+comment:
+	Menu key replaces Home key
+---------------------------------------------------------------------------------
+HowayHuo 2010-4-19 11:50
+change file:
+    arch/arm/mach-wmt/pm.c
+comment:
+    short-press button to close backlight.
+    long-press button to pop-up power-off menu
+change file:
+    drivers/char/wmt-pwm.c
+    drivers/video/wmt/lcd.c
+    drivers/video/wmt/vout-wm8510.c
+comment:
+    Revover PWM register when LCD resume
+change file:
+    sound/arm/wmt_ac97.c
+    drivers/mmc/core/core.c
+comment:
+    Reconfigure AC97 after audio release
+---------------------------------------------------------------------------------
+LuisZhou 2010-4-19
+change file:
+		drivers/misc/pmem.c
+		drivers/video/wmt/ge_main.c
+comment:
+		Change the memory size from 6M to 3M for FB0 and cursor.		
+
+---------------------------------------------------------------------------------
+HangYan 2010-4-20
+change file:
+    drivers\mtd\wmt_env.c
+comment:
+    Add the function to read the argument of u-boot from memory not spi flash.
+---------------------------------------------------------------------------------
+HowayHuo 2010-4-20 16:00
+change file:
+    arch\arm\mach-wmt\pm.c
+comment:
+    Clear "suspend to ram" bit when system resume
+change file:
+    drivers\video\wmt\vout-wm8510.c
+comment: 
+    Delay PWM resume to avoid LCD Flicker during LCD resume
+---------------------------------------------------------------------------------
+HangYan 2010-4-22 11:25
+change file:
+	drivers\input\keyboard\wmt_kpad\bv07_e900_8505v1_kpad.c
+	drivers\input\keyboard\wmt_kpad\wmt_keypadall.c
+	drivers\input\keyboard\wmt_kpad\Makefile
+	drivers\input\keyboard\wmt_kpad\Makefile-builtin
+comment:
+	Support the keypad of bv07-e900-8505.
+---------------------------------------------------------------------------------
+Howayhuo 2010-4-26 11:50
+change file:
+    arch\arm\mach-wmt\pm.c
+comment:
+    Disable wakeup 0
+change file:
+    sound/arm/wmt_ac97.c
+comment:
+    Restore VT1613 register when audio resume
+change file:
+    drivers\usb\gadget\udc_wmt.c
+comment:
+    Return ture in wmt_wakeup() function so that the udc resume successful
+---------------------------------------------------------------------------------
+HangYan 2010-4-26 18:14
+Add file:
+    drivers\input\keyboard\wmt_kpad\jinghan607_matrix.c
+comment:
+		support the kpad of JingHan607.
+---------------------------------------------------------------------------------
+HowayHuo 2010-4-27 9:40
+Change File:
+    drivers\usb\gadget\file_storage.c
+Comment:
+    Reslove the issue that the SD Card can't be remounted when the USB Device is disconnected
+---------------------------------------------------------------------------------
+FlashChen 2010-4-27 11:10
+Change File:
+    drivers\mtd\nand\wmt_nand.c
+Comment:
+    Add data and cache partition to partition table
+---------------------------------------------------------------------------------
+Simenxie 2010-4-27 14:10
+Change File:
+    drivers\mtd\nand\wmt_nand.c
+Comment:
+    change partition size of nand flash
+
+---------------------------------------------------------------------------------
+HangYan 2010-4-30 10:41
+Change File:
+		drivers\input\Makefile
+		drivers\input\sensor\Makefile
+		drivers\input\sensor\mma7660.c
+Comment:
+		support the gravity game.
+---------------------------------------------------------------------------------
+HowayHuo 2010-4-30 11:08
+Change File:
+1.  drivers\media\video\wmt\wmt-vd.c
+comment:
+    use platform_device_register() to register the driver
+
+2.  drivers\mtd\nand\nand_ids.c
+comment:
+    replace it using BSP0.9.1 version
+    support HYNIX_HY27UF084G2M and H27U4G8T2B
+
+3.  drivers\mtd\nand\wmt_nand.c
+comment:
+    replace it using BSP0.9.1 version
+
+4.  drivers\usb\gadget\file_storage.c
+comment:
+    Don't cloase the backing file of loop device when USB Device is disconnected
+
+5. drivers\usb\gadget\udc_wmt.c
+comment:
+    Don't suspend when USB Device is connected
+
+6. sound\arm\wmt_ac97.c
+comment:
+    Use wmt_getsyspara_cache() instead of wmt_getsyspara()
+---------------------------------------------------------------------------------
+HangYan 2010-4-30 22:36
+Change File:
+		drivers\input\sensor\mma7660.c
+Comment:
+		Fix the bug failed to rotate.
+
+---------------------------------------------------------------------------------
+Luiszhou 2010-05-06 11:26
+Change File:
+		driver/media/video/uvc/uvc_driver.c
+		driver/media/video/uvc/uvcvideo.h
+Comment:
+		Support Microdia Sonix USB 2.0 Camera £¨ID 0c45:62c0£©		
+
+---------------------------------------------------------------------------------
+HangYan 2010-5-6 14:04
+Change File:
+	drivers\input\sensor\mma7660.c
+Comment:
+  Fix the bug that the sensor is too sensitive.
+
+---------------------------------------------------------------------------------
+HowayHuo 2010-5-10 18:11
+Change File:
+    drivers\mmc\host\mmc_atsmb.c
+Comment:
+    Don't pull up and pull down GPIO when sd_powerup and sd_powerdown isn't set
+    Resolve the bad card issue that the good card isn't initialized if first insert the bad card and  that remove it
+---------------------------------------------------------------------------------
+HangYan 2010-5-20 15:50
+Change File:
+	\drivers\input\sensor\mma7660.c
+	\drivers\input\sensor\readme.txt
+Comment:
+	Support more gravity games and manually rotate.
+---------------------------------------------------------------------------------
+FlashChen 2010-5-24 12:00
+Change File:
+	\net\packet\af_packet.c
+
+Comment:
+	Resolve adsl dialing issue from android.
+---------------------------------------------------------------------------------
+HowayHuo 2010-5-25
+Change File:
+    drivers\video\wmt\processbar\processbar-slide.c
+Comment:
+    Correct the Framebuffer address if the framebuffer address is wrong that is set in U-BOOT
+---------------------------------------------------------------------------------
+HangYan 2010-5-26
+Change File:
+		\arch\arm\mach-wmt\pm.c
+Comment:
+		Support power button of M002_V1 for PuZhi. The normal pressed to report ESC and long time for power off.
+
+---------------------------------------------------------------------------------
+HangYan 2010-5-28 9:33
+Change File:
+		\drivers\input\keyboard\wmt_kpad\matrix_keypad.c
+		\drivers\input\keyboard\wmt_kpad\matrix_keypad.h
+		\drivers\input\keyboard\wmt_kpad\wmt_keypadall.c
+		\drivers\input\keyboard\wmt_kpad\wmt_keypadall.h
+		\drivers\input\keyboard\wmt_kpad\gcx710v1_matrix.c
+		\drivers\input\keyboard\wmt_kpad\wms8060c_kpad.c
+Comment:
+		Support the kpad of wms8060c and gcx710v1.		
+
+---------------------------------------------------------------------------------
+HangYan 2010-6-3 17:06
+Change File:
+	\sound\arm\wmt_ac97.c
+Comment:
+	Set the pcm volume of Puzhi by the u-boot arg pcmvolum.
+Add File:
+	\drivers\spi\wmt-spi.c
+	\drivers\spi\wmt-spiio.h
+	\drivers\input\touchscreen\cs7146
+Comment:
+	Support cs7146 touch screen.
+---------------------------------------------------------------------------------
+		
+KevinGuan 2010-6-7 12:00
+Change File:
+	\driver\input\keyboard\wmt_kpad\Makefile
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.c
+Add File:
+	\driver\input\keyboard\wmt_kpad\wm710ac_kpad.c
+
+Comment:
+	support 710 ac key pad
+
+---------------------------------------------------------------------------------
+KevinGuan 2010-6-10 09:46
+Change File:
+	\config
+Add File:
+	support pl2303 serial port for usb gps dongle
+
+---------------------------------------------------------------------------------
+HangYan 2010-6-13 10:29
+Change file:
+	\driver\input\keyboard\wmt_kpad\gcx710v1_matrix.c
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.c
+	\driver\input\keyboard\wmt_kpad\matrix_keypad.c
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.h
+Comment:
+	Fix the long pressed key bug for gcx710v1.
+
+---------------------------------------------------------------------------------
+HangYan 2010-6-18 14:58
+Change file:
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.h
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.c
+	\driver\input\keyboard\wmt_kpad\gcx710v1_matrix.c
+	\driver\input\keyboard\wmt_kpad\wm710Ac_kpad.c
+Comment:
+	Support the long pressed key(menu) for wm710ac.
+---------------------------------------------------------------------------------
+HangYan 2010-6-22 10:56
+Change file:
+	\driver\input\keyboard\wmt_kpad\wmt_keypadall.c
+Add file:
+	\driver\input\keyboard\wmt_kpad\m55v721111_matrix.c
+Comment:
+	Support the kpad of M55-V721-111.
+---------------------------------------------------------------------------------
+HangYan 2010-6-24 16:04
+Change file:
+	\drivers\spi\wmt-spi.c
+Comment:
+	Support spi to suspend and resume.
+	
+
+
+

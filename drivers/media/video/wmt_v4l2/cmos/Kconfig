@@ -1,0 +1,11 @@
+#
+# Multimedia Video device configuration
+#
+
+config WMT_V4L2_CMOS
+	tristate "WonderMedia Hardware CMOS Support"
+	---help---
+	  Say Y here to use hardware CMOS Support	
+  
+
+ 	

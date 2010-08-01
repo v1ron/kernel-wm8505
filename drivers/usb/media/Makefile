@@ -1,0 +1,19 @@
+#
+# Makefile for USB Media drivers
+#
+
+sn9c102-objs	:= sn9c102_core.o sn9c102_pas106b.o sn9c102_tas5110c1b.o sn9c102_tas5130d1b.o sn9c102_pas202bcb.o
+uvcvideo-objs	:= uvc_driver.o uvc_queue.o uvc_v4l2.o uvc_video.o uvc_ctrl.o uvc_status.o uvc_isight.o 
+
+
+obj-$(CONFIG_USB_DABUSB)	+= dabusb.o
+obj-$(CONFIG_USB_DSBR)		+= dsbr100.o
+obj-$(CONFIG_USB_IBMCAM)	+= ibmcam.o usbvideo.o ultracam.o
+obj-$(CONFIG_USB_KONICAWC)	+= konicawc.o usbvideo.o
+obj-$(CONFIG_USB_OV511)		+= ov511.o
+obj-$(CONFIG_USB_SE401)		+= se401.o
+obj-$(CONFIG_USB_SN9C102)	+= sn9c102.o
+obj-$(CONFIG_USB_STV680)	+= stv680.o
+obj-$(CONFIG_USB_VICAM)		+= vicam.o usbvideo.o
+obj-$(CONFIG_USB_W9968CF)	+= w9968cf.o
+obj-$(CONFIG_USB_UVCVIDEO)	+= uvcvideo.o
