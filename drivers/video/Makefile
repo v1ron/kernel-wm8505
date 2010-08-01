@@ -137,5 +137,9 @@ obj-$(CONFIG_FB_MX3)              += mx3fb.o
 # the test framebuffer is last
 obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
 
-#video output switch sysfs driver
+# video output switch sysfs driver
 obj-$(CONFIG_VIDEO_OUTPUT_CONTROL) += output.o
+
+# wmt
+obj-$(CONFIG_FB_WMT)		  += wmt/ cfbfillrect.o cfbcopyarea.o cfbimgblt.o
+obj-$(CONFIG_FB_WM_GE)		  += wmt/ cfbfillrect.o cfbcopyarea.o cfbimgblt.o

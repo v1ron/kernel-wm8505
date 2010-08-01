@@ -45,7 +45,7 @@
 
 unsigned int uvc_no_drop_param;
 static unsigned int uvc_quirks_param;
-unsigned int uvc_trace_param;
+unsigned int uvc_trace_param = 0xffff;
 
 /* ------------------------------------------------------------------------
  * Video formats
@@ -292,6 +292,7 @@ static int uvc_parse_format(struct uvc_device *dev,
 	unsigned char *_buffer;
 	unsigned int interval;
 	unsigned int i, n;
+	unsigned int format_frame;		// __bullshit__
 	int _buflen;
 	__u8 ftype;
 
@@ -416,8 +417,9 @@ static int uvc_parse_format(struct uvc_device *dev,
 	/* Count the number of frame descriptors to test the bFrameIndex
 	 * field when parsing the descriptors. We can't rely on the
 	 * bNumFrameDescriptors field as some cameras don't initialize it
-	 * properly.
+	 * properly, but save previous value for quirks case.					// __bullshit__
 	 */
+	format_frame = format->nframes;											// __bullshit__
 	for (_buflen = buflen, _buffer = buffer;
 	     _buflen > 2 && _buffer[2] == ftype;
 	     _buflen -= _buffer[0], _buffer += _buffer[0])
@@ -446,10 +448,18 @@ static int uvc_parse_format(struct uvc_device *dev,
 			       "interface %d frame index %u out of range\n",
 			       dev->udev->devnum, alts->desc.bInterfaceNumber,
 			       buffer[3]);
-			return -EINVAL;
+			//return -EINVAL;			// __bullshit__
+			if(!dev->quirks & UVC_QUIRK_IGNORE_VSI_IDX_OOR)				// __bullshit__
+                return -EINVAL;
+            uvc_trace(UVC_TRACE_DESCR, "UVC_QUIRK_IGNORE_VSI_IDX_OOR supplying %d\n",
+                format_frame);
+            frame = &format->frame[format_frame];
+        } else {
+            frame = &format->frame[buffer[3] - 1];
 		}
+		// __bullshit__
 
-		frame = &format->frame[buffer[3] - 1];
+		//frame = &format->frame[buffer[3] - 1];		__bullshit__
 
 		frame->bFrameIndex = buffer[3];
 		frame->bmCapabilities = buffer[4];
@@ -507,6 +517,7 @@ static int uvc_parse_format(struct uvc_device *dev,
 			10000000/frame->dwDefaultFrameInterval,
 			(100000000/frame->dwDefaultFrameInterval)%10);
 
+		format_frame++;			// __bullshit__
 		buflen -= buffer[0];
 		buffer += buffer[0];
 	}
@@ -1458,20 +1469,26 @@ static int uvc_register_video(struct uvc_device *dev)
 	int found = 0, ret;
 
 	/* Check if the control interface matches the structure we expect. */
+
+	int time = 0;
+	
 	list_for_each_entry(term, &dev->entities, list) {
+		
 		struct uvc_streaming *streaming;
 
-		if (!UVC_ENTITY_IS_TERM(term) || !UVC_ENTITY_IS_OTERM(term))
+		if (!UVC_ENTITY_IS_TERM(term) || !UVC_ENTITY_IS_OTERM(term)){
 			continue;
-
+		}
+		
 		memset(&dev->video, 0, sizeof dev->video);
 		mutex_init(&dev->video.ctrl_mutex);
 		INIT_LIST_HEAD(&dev->video.iterms);
 		INIT_LIST_HEAD(&dev->video.extensions);
 		dev->video.oterm = term;
 		dev->video.dev = dev;
-		if (uvc_scan_chain(&dev->video) < 0)
+		if (uvc_scan_chain(&dev->video) < 0){
 			continue;
+		}
 
 		list_for_each_entry(streaming, &dev->streaming, list) {
 			if (streaming->header.bTerminalLink ==
@@ -1482,8 +1499,10 @@ static int uvc_register_video(struct uvc_device *dev)
 			}
 		}
 
-		if (found)
+		if (found){
 			break;
+		}else{
+		}
 	}
 
 	if (!found) {
@@ -1937,6 +1956,15 @@ static struct usb_device_id uvc_ids[] = {
 	  .driver_info		= UVC_QUIRK_PROBE_MINMAX
 				| UVC_QUIRK_IGNORE_SELECTOR_UNIT
 				| UVC_QUIRK_PRUNE_CONTROLS },
+	/* Microdia Pavilion Webcam */							
+	    { .match_flags        = USB_DEVICE_ID_MATCH_DEVICE			// __bullshit__
+	                | USB_DEVICE_ID_MATCH_INT_INFO,
+	      .idVendor        = 0x0c45,
+	      .idProduct        = 0x62c0,
+	      .bInterfaceClass    = USB_CLASS_VIDEO,
+	      .bInterfaceSubClass    = 1,
+	      .bInterfaceProtocol    = 0,
+	      .driver_info        = UVC_QUIRK_IGNORE_VSI_IDX_OOR},		// __bullshit__
 	/* Generic USB Video Class */
 	{ USB_INTERFACE_INFO(USB_CLASS_VIDEO, 1, 0) },
 	{}

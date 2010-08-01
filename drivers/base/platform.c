@@ -690,6 +690,7 @@ static int platform_pm_suspend(struct device *dev)
 		if (drv->pm->suspend)
 			ret = drv->pm->suspend(dev);
 	} else {
+	printk("platform dev->driver->name = %s\n", dev->driver->name);
 		ret = platform_legacy_suspend(dev, PMSG_SUSPEND);
 	}
 

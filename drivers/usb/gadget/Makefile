@@ -22,6 +22,10 @@ obj-$(CONFIG_USB_M66592)	+= m66592-udc.o
 obj-$(CONFIG_USB_FSL_QE)	+= fsl_qe_udc.o
 obj-$(CONFIG_USB_CI13XXX)	+= ci13xxx_udc.o
 
+obj-$(CONFIG_USB_VT8420)	+= vt8420_udc.o
+obj-$(CONFIG_USB_VT8430)	+= vt8430_udc.o
+obj-$(CONFIG_USB_VT8500)	+= vt8500_udc.o
+obj-$(CONFIG_USB_WMT)			+= udc_wmt.o
 #
 # USB gadget drivers
 #
@@ -30,7 +34,8 @@ g_ether-objs			:= ether.o
 g_serial-objs			:= serial.o
 g_midi-objs			:= gmidi.o
 gadgetfs-objs			:= inode.o
-g_file_storage-objs		:= file_storage.o
+g_file_storage-objs		:= file_storage.o usbstring.o config.o \
+					epautoconf.o
 g_printer-objs			:= printer.o
 g_cdc-objs			:= cdc2.o
 g_android-objs			:= android.o f_adb.o f_mass_storage.o

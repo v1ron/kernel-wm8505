@@ -21,6 +21,8 @@
 #include "yaffs_guts.h"
 #include "yaffs_ecc.h"
 
+#define YAFFS_IGNORE_TAGS_ECC  //Vincent 2009.5.26
+
 typedef struct {
 	unsigned sequenceNumber;
 	unsigned objectId;
@@ -30,7 +32,7 @@ typedef struct {
 
 typedef struct {
 	yaffs_PackedTags2TagsPart t;
-	yaffs_ECCOther ecc;
+//	yaffs_ECCOther ecc;  //Marked out by Vincent 2009.5.26
 } yaffs_PackedTags2;
 
 /* Full packed tags with ECC, used for oob tags */

@@ -73,6 +73,8 @@ int usb_hcd_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (pci_enable_device(dev) < 0)
 		return -ENODEV;
 	dev->current_state = PCI_D0;
+/* CharlesTu,2008/12/23,Patch VT3426 UHCI irq is 0 issue*/	
+/*	
 
 	if (!dev->irq) {
 		dev_err(&dev->dev,
@@ -82,6 +84,7 @@ int usb_hcd_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto err1;
 	}
 
+*/
 	hcd = usb_create_hcd(driver, &dev->dev, pci_name(dev));
 	if (!hcd) {
 		retval = -ENOMEM;

@@ -385,6 +385,8 @@ static int pmem_allocate(int id, unsigned long len)
 	int best_fit = -1;
 	unsigned long order = pmem_order(len);
 
+	printk("pmem: pid %d, allocate %x\n", id, len);
+
 	if (pmem[id].no_allocator) {
 		DLOG("no allocator");
 		if ((len > pmem[id].size) || pmem[id].allocated)
@@ -403,6 +405,11 @@ static int pmem_allocate(int id, unsigned long len)
 	 */
 	while (curr < end) {
 		if (PMEM_IS_FREE(id, curr)) {
+
+			printk("the curr is %x, and allocate order is %x, and curr order is %x\n", 
+						curr, 
+						order, 
+						PMEM_ORDER(id, curr));
 			if (PMEM_ORDER(id, curr) == (unsigned char)order) {
 				/* set the not free bit and clear others */
 				best_fit = curr;
@@ -1087,8 +1094,8 @@ static long pmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				region.offset = pmem_start_addr(id, data);
 				region.len = pmem_len(id, data);
 			}
-			printk(KERN_INFO "pmem: request for physical address of pmem region "
-					"from process %d.\n", current->pid);
+			//printk(KERN_INFO "pmem: request for physical address of pmem region "
+			//		"from process %d.\n", current->pid);
 			if (copy_to_user((void __user *)arg, &region,
 						sizeof(struct pmem_region)))
 				return -EFAULT;
@@ -1295,7 +1302,6 @@ err_cant_register_device:
 static int pmem_probe(struct platform_device *pdev)
 {
 	struct android_pmem_platform_data *pdata;
-
 	if (!pdev || !pdev->dev.platform_data) {
 		printk(KERN_ALERT "Unable to probe pmem!\n");
 		return -1;
@@ -1313,16 +1319,108 @@ static int pmem_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver pmem_driver = {
+struct platform_driver pmem_driver = {
 	.probe = pmem_probe,
 	.remove = pmem_remove,
-	.driver = { .name = "android_pmem" }
+//	.driver = { .name = "android_pmem" }
+	.driver = { .name = "pmem" }
+};
+
+static struct android_pmem_platform_data wmt_pmem_platform_data = {
+//	.name 			= "android_pmem",
+	.name			= "pmem",
+	.start			= 0,
+	.size			= 0x1000000,	
 };
 
 
-static int __init pmem_init(void)
+static struct platform_device wmt_pmem_device = {
+//	.name			= "android_pmem",
+	.name			= "pmem",
+
+	.id				= 0,
+//	.dev 			= {
+//		.platform_data = &wmt_pmem_platform_data,
+//		.driver = &(pmem_driver.driver),
+//	},
+};
+/*
+
+static struct android_pmem_platform_data wmt_pmem_platform_data2 = {
+//	.name 			= "android_pmem",
+	.name			= "pmem2",
+	.start			= 0x5400000,
+	.size			= 0x0C00000,	
+};
+
+
+static struct platform_device wmt_pmem_device2 = {
+//	.name			= "android_pmem",
+	.name			= "pmem",
+
+	.id				= 1,
+	.dev 			= {
+		.platform_data = &wmt_pmem_platform_data2,
+//		.driver = &(pmem_driver.driver),
+	},
+};
+*/
+
+#define PMEM_VRAM_SIZE 0x1000000
+#define FB_VRAM_SIZE 0x300000
+#define B2M(size) (size >> 20)
+
+#define M(x) ((x)<<20)
+unsigned int pmem_vram_addr(u32 size)
 {
-	return platform_driver_register(&pmem_driver);
+	unsigned int memsize = (num_physpages << PAGE_SHIFT);
+
+	if (memsize > M(256)) { 		/* 512M */
+		memsize = M(512);
+	} else if (memsize > M(128)) {	/* 256M */
+		memsize = M(256);
+	} else if (memsize > M(64)) {	/* 128M */
+		memsize = M(128);
+	} else if (memsize > M(32)) {	/* 64M */
+		memsize = M(64);
+	} else if (memsize > M(16)) {	/* 32M */
+		memsize = M(32);
+	} else {
+		memsize = M(0);
+	}
+	return (memsize - FB_VRAM_SIZE - M(size));
+}
+
+
+static int __init pmem_init(void)
+{	
+	extern int __init platform_add_device(struct platform_device *dev);
+
+	int ret;
+	
+	if (wmt_pmem_platform_data.start == 0)
+		//info->fix.smem_start = ge_vram_addr(B2M(FB_VRAM_SIZE));
+		wmt_pmem_platform_data.start = pmem_vram_addr(B2M(PMEM_VRAM_SIZE));
+		
+	wmt_pmem_device.dev.platform_data = &wmt_pmem_platform_data;
+
+	ret = platform_device_register(&wmt_pmem_device);
+	if(!ret){
+	}else{
+	}
+	/*
+
+	ret = platform_device_register(&wmt_pmem_device2);
+	if(!ret){
+	}else{
+	}
+*/	
+	ret = platform_driver_register(&pmem_driver);
+	if(!ret){
+	}else{
+	}
+	
+	return ret; 
 }
 
 static void __exit pmem_exit(void)

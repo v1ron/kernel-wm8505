@@ -190,8 +190,8 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 export KBUILD_BUILDHOST := $(SUBARCH)
-ARCH		?= $(SUBARCH)
-CROSS_COMPILE	?=
+ARCH		?= arm
+CROSS_COMPILE	?= arm_v5t_le-
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -1588,3 +1588,71 @@ FORCE:
 # Declare the contents of the .PHONY variable as phony.  We keep that
 # information in a variable se we can use it in if_changed and friends.
 .PHONY: $(PHONY)
+ubin: _all
+	mkimage -A arm -O linux -T kernel -C none -a 0x8000 -e 0x8000 -n "MontaVista Linux 2.6.10" -d arch/arm/boot/zImage uzImage.bin
+
+####################################################The follows for releasing bsp###################################
+.PHONY: make_bsp via_obj via_src
+
+BSP_VERSION_NAME = 2629
+MINOR_VERSION = 01
+RELEASE_DATE = `date +%Y%m%d`
+BSP_PKG_NAME = bsp_WM8505_$(BSP_VERSION_NAME).$(MINOR_VERSION)_$(RELEASE_DATE)
+
+KERNEL_CURRDIR_NAME = common
+
+BSP_VIA_OBJS = $(shell cat via_objlist)
+BSP_VIA_SRCS = $(BSP_VIA_OBJS:.o=.c)
+
+BSP_VIA_SRCDIR = ../via_src_$(BSP_VERSION_NAME).$(MINOR_VERSION)
+
+ifeq ($(CROSS_COMPILE),arm_v4t_le-)
+	BSP_VIA_OBJDIR = ../via_obj.arm_v4t-$(BSP_VERSION_NAME).$(MINOR_VERSION)
+endif
+
+ifeq ($(CROSS_COMPILE),arm_v5t_le-)
+	BSP_VIA_OBJDIR = ../via_obj.arm_v5t-$(BSP_VERSION_NAME).$(MINOR_VERSION)
+endif
+
+ifeq ($(CROSS_COMPILE),arm-9tdmi-linux-gnu-)
+	BSP_VIA_OBJDIR = ../via_obj.arm-9tdmi-$(BSP_VERSION_NAME).$(MINOR_VERSION)
+endif
+
+ifeq ($(CROSS_COMPILE),armv5t-softfloat-linux-gnu-)
+	BSP_VIA_OBJDIR = ../via_obj.armv5t-softfloat-$(BSP_VERSION_NAME).$(MINOR_VERSION)
+endif
+
+ifeq ($(BSP_VIA_OBJDIR),)
+	BSP_VIA_OBJDIR = ../via_obj-$(BSP_VERSION_NAME).$(MINOR_VERSION)
+endif
+via_bsp:
+	@echo copy all via source to $(BSP_VIA_SRCDIR)...
+	mkdir -p $(BSP_VIA_SRCDIR)
+	rm -rf ../$(BSP_PKG_NAME).tar.gz
+	@for f in $(BSP_VIA_SRCS); \
+	do \
+		cp --parents $$f $(BSP_VIA_SRCDIR)	;\
+		rm -rf $$f	;	\
+	done ; \
+
+	@echo copy all via binary to $(BSP_VIA_OBJDIR)...
+	@rm -rf $(BSP_VIA_OBJDIR)
+	mkdir -p $(BSP_VIA_OBJDIR)
+	@for f in $(BSP_VIA_OBJS); \
+	do \
+		cp --parents $$f $(BSP_VIA_OBJDIR) || true	;\
+	done ; \
+
+	@echo make clean ...
+	@make clean
+
+	@echo package ...
+	tar cvf ../$(BSP_PKG_NAME).tar -C.. $(KERNEL_CURRDIR_NAME) -X via_exclude
+	tar rvf ../$(BSP_PKG_NAME).tar  $(BSP_VIA_OBJDIR) -X via_exclude
+	gzip ../$(BSP_PKG_NAME).tar
+
+via_obj:
+	cp -Rf $(BSP_VIA_OBJDIR)/* ./
+
+via_src:
+	cp -Rf $(BSP_VIA_SRCDIR)/* ./

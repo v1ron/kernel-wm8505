@@ -257,3 +257,16 @@ endif # SPI_MASTER
 # (slave support would go here)
 
 endif # SPI
+menu "WMT Spi Support"
+
+config WMT_SPI_SUPPORT
+    tristate "WonderMedia SPI Support(Proprietary)"
+    default y
+	help
+	  If you say yes here you get support for the WMT chip.
+	  This is proprietary driver for WMT
+	  
+	  This driver can also be built as a module.  If so, the module
+	  will be called wmt-spi.
+	  
+endmenu

@@ -111,6 +111,8 @@ obj-$(CONFIG_PS3_FLASH)		+= ps3flash.o
 
 obj-$(CONFIG_JS_RTC)		+= js-rtc.o
 js-rtc-y = rtc.o
+obj-$(CONFIG_PWM_WMT)		+= wmt-pwm.o
+obj-$(CONFIG_WMT_VIBRATOR)				+= wmt_vibrate/
 
 # Files generated that shall be removed upon make clean
 clean-files := consolemap_deftbl.c defkeymap.c
@@ -136,3 +138,4 @@ $(obj)/defkeymap.c: $(obj)/%.c: $(src)/%.map
 	rm $@.tmp
 
 endif
+

@@ -6,7 +6,7 @@
  *  GK 2/5/95  -  Changed to support mounting root fs via NFS
  *  Added initrd & change_root: Werner Almesberger & Hans Lermen, Feb '96
  *  Moan early if gcc is old, avoiding bogus kernels - Paul Gortmaker, May '96
- *  Simplified starting of init:  Michael A. Griffith <grif@acm.org> 
+ *  Simplified starting of init:  Michael A. Griffith <grif@acm.org>
  */
 
 #include <linux/types.h>
@@ -829,8 +829,16 @@ static noinline int init_post(void)
 	panic("No init found.  Try passing init= option to kernel.");
 }
 
+//--> added by howayhuo on 20100305
+//extern int start_boot_splash(void);
+//<-- end add
+
 static int __init kernel_init(void * unused)
 {
+//--> added by howayhuo on 20100305
+//        start_boot_splash();
+//<-- end added
+
 	lock_kernel();
 	/*
 	 * init can run on any cpu.

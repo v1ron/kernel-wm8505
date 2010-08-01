@@ -1,7 +1,7 @@
 /*
  * file_storage.c -- File-backed USB Storage Gadget, for USB development
  *
- * Copyright (C) 2003-2008 Alan Stern
+ * Copyright (C) 2003, 2004 Alan Stern
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -38,17 +38,16 @@
 
 /*
  * The File-backed Storage Gadget acts as a USB Mass Storage device,
- * appearing to the host as a disk drive or as a CD-ROM drive.  In addition
- * to providing an example of a genuinely useful gadget driver for a USB
- * device, it also illustrates a technique of double-buffering for increased
- * throughput.  Last but not least, it gives an easy way to probe the
- * behavior of the Mass Storage drivers in a USB host.
+ * appearing to the host as a disk drive.  In addition to providing an
+ * example of a genuinely useful gadget driver for a USB device, it also
+ * illustrates a technique of double-buffering for increased throughput.
+ * Last but not least, it gives an easy way to probe the behavior of the
+ * Mass Storage drivers in a USB host.
  *
  * Backing storage is provided by a regular file or a block device, specified
  * by the "file" module parameter.  Access can be limited to read-only by
- * setting the optional "ro" module parameter.  (For CD-ROM emulation,
- * access is always read-only.)  The gadget will indicate that it has
- * removable media if the optional "removable" module parameter is set.
+ * setting the optional "ro" module parameter.  The gadget will indicate that
+ * it has removable media if the optional "removable" module parameter is set.
  *
  * The gadget supports the Control-Bulk (CB), Control-Bulk-Interrupt (CBI),
  * and Bulk-Only (also known as Bulk-Bulk-Bulk or BBB) transports, selected
@@ -65,12 +64,7 @@
  * The default number of LUNs is taken from the number of "file" elements;
  * it is 1 if "file" is not given.  If "removable" is not set then a backing
  * file must be specified for each LUN.  If it is set, then an unspecified
- * or empty backing filename means the LUN's medium is not loaded.  Ideally
- * each LUN would be settable independently as a disk drive or a CD-ROM
- * drive, but currently all LUNs have to be the same type.  The CD-ROM
- * emulation includes a single data track and no audio tracks; hence there
- * need be only one backing file per LUN.  Note also that the CD-ROM block
- * length is set to 512 rather than the more common value 2048.
+ * or empty backing filename means the LUN's medium is not loaded.
  *
  * Requirements are modest; only a bulk-in and a bulk-out endpoint are
  * needed (an interrupt-out endpoint is also needed for CBI).  The memory
@@ -97,8 +91,6 @@
  *					USB device controller (usually true),
  *					boolean to permit the driver to halt
  *					bulk endpoints
- *	cdrom			Default false, boolean for whether to emulate
- *					a CD-ROM drive
  *	transport=XXX		Default BBB, transport name (CB, CBI, or BBB)
  *	protocol=YYY		Default SCSI, protocol name (RBC, 8020 or
  *					ATAPI, QIC, UFI, 8070, or SCSI;
@@ -111,16 +103,15 @@
  *					PAGE_CACHE_SIZE)
  *
  * If CONFIG_USB_FILE_STORAGE_TEST is not set, only the "file", "ro",
- * "removable", "luns", "stall", and "cdrom" options are available; default
- * values are used for everything else.
+ * "removable", "luns", and "stall" options are available; default values
+ * are used for everything else.
  *
  * The pathnames of the backing files and the ro settings are available in
  * the attribute files "file" and "ro" in the lun<n> subdirectory of the
  * gadget's sysfs directory.  If the "removable" option is set, writing to
  * these files will simulate ejecting/loading the medium (writing an empty
  * line means eject) and adjusting a write-enable tab.  Changes to the ro
- * setting are not allowed when the medium is loaded or if CD-ROM emulation
- * is being used.
+ * setting are not allowed when the medium is loaded.
  *
  * This gadget driver is heavily based on "Gadget Zero" by David Brownell.
  * The driver's SCSI command interface was based on the "Information
@@ -226,11 +217,20 @@
  */
 
 
-/* #define VERBOSE_DEBUG */
-/* #define DUMP_MSGS */
+#undef DEBUG
+#undef VERBOSE
+#undef DUMP_MSGS
+
+//#define FLUSH_CBW_BUFFER
+#undef FLUSH_CBW_BUFFER
 
 
+#include <asm/system.h>
+#include <asm/uaccess.h>
+
+#include <linux/bitops.h>
 #include <linux/blkdev.h>
+#include <linux/compiler.h>
 #include <linux/completion.h>
 #include <linux/dcache.h>
 #include <linux/delay.h>
@@ -238,10 +238,18 @@
 #include <linux/fcntl.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/kref.h>
 #include <linux/kthread.h>
 #include <linux/limits.h>
+#include <linux/list.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/pagemap.h>
 #include <linux/rwsem.h>
+#include <linux/sched.h>
+#include <linux/signal.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
@@ -250,27 +258,16 @@
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
+#include <linux/switch.h>
 
 #include "gadget_chips.h"
 
 
-
-/*
- * Kbuild is not very cooperative with respect to linking separately
- * compiled library objects into one module.  So for now we won't use
- * separate compilation ... ensuring init/exit sections work to shrink
- * the runtime footprint, and giving us at least some parts of what
- * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
- */
-#include "usbstring.c"
-#include "config.c"
-#include "epautoconf.c"
-
 /*-------------------------------------------------------------------------*/
 
 #define DRIVER_DESC		"File-backed Storage Gadget"
-#define DRIVER_NAME		"g_file_storage"
-#define DRIVER_VERSION		"20 November 2008"
+#define DRIVER_NAME		"usb_mass_storage"
+#define DRIVER_VERSION		"20 October 2004"
 
 static const char longname[] = DRIVER_DESC;
 static const char shortname[] = DRIVER_NAME;
@@ -283,56 +280,81 @@ MODULE_LICENSE("Dual BSD/GPL");
  *
  * DO NOT REUSE THESE IDs with any other driver!!  Ever!!
  * Instead:  allocate your own, using normal USB-IF procedures. */
-#define DRIVER_VENDOR_ID	0x0525	// NetChip
-#define DRIVER_PRODUCT_ID	0xa4a5	// Linux-USB File-backed Storage Gadget
 
+//Linux-USB File-backed Storage Gadget
+#define DRIVER_VENDOR_ID	0x040D	// VIA Chip
+#define DRIVER_PRODUCT_ID	0x8510	// PID
 
+#undef SQUELCH_DETECTOR
+
+#define UDC_SELF_POWER
 /*
  * This driver assumes self-powered hardware and has no way for users to
  * trigger remote wakeup.  It uses autoconfiguration to select endpoints
  * and endpoint addresses.
  */
 
-
 /*-------------------------------------------------------------------------*/
 
+#define xprintk(f,level,fmt,args...) \
+	dev_printk(level , &(f)->gadget->dev , fmt , ## args)
+#define yprintk(l,level,fmt,args...) \
+	dev_printk(level , &(l)->dev , fmt , ## args)
+
+//GigaHsu 2007.05.09 : print debug message
+//#define DEBUG
+//#define VERBOSE
+//#define DUMP_MSGS
+
+#ifdef DEBUG //-------------------------------------------------------------------
+#define DBG(fsg,fmt,args...) \
+	xprintk(fsg , KERN_DEBUG , fmt , ## args)
 #define LDBG(lun,fmt,args...) \
-	dev_dbg(&(lun)->dev , fmt , ## args)
+	yprintk(lun , KERN_DEBUG , fmt , ## args)
 #define MDBG(fmt,args...) \
-	pr_debug(DRIVER_NAME ": " fmt , ## args)
+	printk(KERN_DEBUG DRIVER_NAME ": " fmt , ## args)
+#else //--------------------------------------------------------------------------
+#define DBG(fsg,fmt,args...) \
+	do { } while (0)
+#define LDBG(lun,fmt,args...) \
+	do { } while (0)
+#define MDBG(fmt,args...) \
+	do { } while (0)
 
-#ifndef DEBUG
-#undef VERBOSE_DEBUG
+#undef VERBOSE
 #undef DUMP_MSGS
-#endif /* !DEBUG */
 
-#ifdef VERBOSE_DEBUG
+#endif /* DEBUG *///-------------------------------------------------------------
+
+//#define DUMP_MSGS
+
+#ifdef VERBOSE
+#define VDBG	DBG
 #define VLDBG	LDBG
 #else
+#define VDBG(fsg,fmt,args...) \
+	do { } while (0)
 #define VLDBG(lun,fmt,args...) \
 	do { } while (0)
-#endif /* VERBOSE_DEBUG */
+#endif /* VERBOSE */
 
+#define ERROR(fsg,fmt,args...) \
+	xprintk(fsg , KERN_ERR , fmt , ## args)
 #define LERROR(lun,fmt,args...) \
-	dev_err(&(lun)->dev , fmt , ## args)
+	yprintk(lun , KERN_ERR , fmt , ## args)
+
+#define WARN(fsg,fmt,args...) \
+	xprintk(fsg , KERN_WARNING , fmt , ## args)
 #define LWARN(lun,fmt,args...) \
-	dev_warn(&(lun)->dev , fmt , ## args)
+	yprintk(lun , KERN_WARNING , fmt , ## args)
+
+#define INFO(fsg,fmt,args...) \
+	xprintk(fsg , KERN_INFO , fmt , ## args)
 #define LINFO(lun,fmt,args...) \
-	dev_info(&(lun)->dev , fmt , ## args)
+	yprintk(lun , KERN_INFO , fmt , ## args)
 
 #define MINFO(fmt,args...) \
-	pr_info(DRIVER_NAME ": " fmt , ## args)
-
-#define DBG(d, fmt, args...) \
-	dev_dbg(&(d)->gadget->dev , fmt , ## args)
-#define VDBG(d, fmt, args...) \
-	dev_vdbg(&(d)->gadget->dev , fmt , ## args)
-#define ERROR(d, fmt, args...) \
-	dev_err(&(d)->gadget->dev , fmt , ## args)
-#define WARNING(d, fmt, args...) \
-	dev_warn(&(d)->gadget->dev , fmt , ## args)
-#define INFO(d, fmt, args...) \
-	dev_info(&(d)->gadget->dev , fmt , ## args)
+	printk(KERN_INFO DRIVER_NAME ": " fmt , ## args)
 
 
 /*-------------------------------------------------------------------------*/
@@ -341,17 +363,18 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 #define MAX_LUNS	8
 
+static char		*file[MAX_LUNS] = {NULL, };
+//static int		ro[MAX_LUNS] = {0, };
+
 static struct {
 	char		*file[MAX_LUNS];
 	int		ro[MAX_LUNS];
-	unsigned int	num_filenames;
-	unsigned int	num_ros;
+	int		num_filenames;
+	int		num_ros;
 	unsigned int	nluns;
 
 	int		removable;
 	int		can_stall;
-	int		cdrom;
-
 	char		*transport_parm;
 	char		*protocol_parm;
 	unsigned short	vendor;
@@ -363,17 +386,23 @@ static struct {
 	char		*transport_name;
 	int		protocol_type;
 	char		*protocol_name;
+#ifdef SQUELCH_DETECTOR
+	unsigned short  squelch_detector;
+#endif
 
 } mod_data = {					// Default values
 	.transport_parm		= "BBB",
 	.protocol_parm		= "SCSI",
 	.removable		= 0,
-	.can_stall		= 1,
-	.cdrom			= 0,
+	.can_stall		= 0,
 	.vendor			= DRIVER_VENDOR_ID,
 	.product		= DRIVER_PRODUCT_ID,
 	.release		= 0xffff,	// Use controller chip type
 	.buflen			= 16384,
+	//.buflen			= 4096,
+#ifdef SQUELCH_DETECTOR
+	.squelch_detector = 0x02,//default 10 Squelch Detector Fine Tune
+#endif
 	};
 
 
@@ -393,9 +422,10 @@ MODULE_PARM_DESC(removable, "true to simulate removable media");
 module_param_named(stall, mod_data.can_stall, bool, S_IRUGO);
 MODULE_PARM_DESC(stall, "false to prevent bulk stalls");
 
-module_param_named(cdrom, mod_data.cdrom, bool, S_IRUGO);
-MODULE_PARM_DESC(cdrom, "true to emulate cdrom instead of disk");
-
+#ifdef SQUELCH_DETECTOR
+module_param_named(squelch, mod_data.squelch_detector, ushort , S_IRUGO);
+MODULE_PARM_DESC(squelch, "squelch detector fine tune");
+#endif
 
 /* In the non-TEST version, only the module parameters listed above
  * are available. */
@@ -424,10 +454,6 @@ MODULE_PARM_DESC(buflen, "I/O buffer size");
 
 
 /*-------------------------------------------------------------------------*/
-
-/* SCSI device types */
-#define TYPE_DISK	0x00
-#define TYPE_CDROM	0x05
 
 /* USB protocol value = the transport method */
 #define USB_PR_CBI	0x00		// Control/Bulk/Interrupt
@@ -505,8 +531,6 @@ struct interrupt_data {
 #define SC_READ_12			0xa8
 #define SC_READ_CAPACITY		0x25
 #define SC_READ_FORMAT_CAPACITIES	0x23
-#define SC_READ_HEADER			0x44
-#define SC_READ_TOC			0x43
 #define SC_RELEASE			0x17
 #define SC_REQUEST_SENSE		0x03
 #define SC_RESERVE			0x16
@@ -533,6 +557,9 @@ struct interrupt_data {
 #define SS_SAVING_PARAMETERS_NOT_SUPPORTED	0x053900
 #define SS_UNRECOVERED_READ_ERROR		0x031100
 #define SS_WRITE_ERROR				0x030c02
+
+#define SS_WRITE_ERROR_OTG  	0x030c02
+
 #define SS_WRITE_PROTECTED			0x072700
 
 #define SK(x)		((u8) ((x) >> 16))	// Sense Key byte, etc.
@@ -572,18 +599,18 @@ struct lun {
 	unsigned int	ro : 1;
 	unsigned int	prevent_medium_removal : 1;
 	unsigned int	registered : 1;
-	unsigned int	info_valid : 1;
 
 	u32		sense_data;
 	u32		sense_data_info;
 	u32		unit_attention_data;
 
+    u32     media_present;//GigaHsu 2007.12.19 : Add for checking a SD card removed/inserted.
 	struct device	dev;
 };
 
 #define backing_file_is_open(curlun)	((curlun)->filp != NULL)
 
-static struct lun *dev_to_lun(struct device *dev)
+static inline struct lun *dev_to_lun(struct device *dev)
 {
 	return container_of(dev, struct lun, dev);
 }
@@ -604,6 +631,7 @@ enum fsg_buffer_state {
 
 struct fsg_buffhd {
 	void				*buf;
+	dma_addr_t			dma;
 	enum fsg_buffer_state		state;
 	struct fsg_buffhd		*next;
 
@@ -650,7 +678,6 @@ struct fsg_dev {
 
 	/* reference counting: wait until all LUNs are released */
 	struct kref		ref;
-
 	struct usb_ep		*ep0;		// Handy copy of gadget->ep0
 	struct usb_request	*ep0req;	// For control responses
 	unsigned int		ep0_req_tag;
@@ -673,10 +700,13 @@ struct fsg_dev {
 	unsigned int		phase_error : 1;
 	unsigned int		short_packet_received : 1;
 	unsigned int		bad_lun_okay : 1;
-
+	unsigned int    bad_cbw_okay : 1;
+	unsigned int    bad_write_dma :1;
+	unsigned int    bulk_in_stall : 1;
+	unsigned int    bulk_out_stall : 1;
 	unsigned long		atomic_bitflags;
 #define REGISTERED		0
-#define IGNORE_BULK_OUT		1
+#define CLEAR_BULK_HALTS	1
 #define SUSPENDED		2
 
 	struct usb_ep		*bulk_in;
@@ -687,9 +717,11 @@ struct fsg_dev {
 	struct fsg_buffhd	*next_buffhd_to_drain;
 	struct fsg_buffhd	buffhds[NUM_BUFFERS];
 
+	wait_queue_head_t	thread_wqh;
 	int			thread_wakeup_needed;
 	struct completion	thread_notifier;
 	struct task_struct	*thread_task;
+	sigset_t		thread_signal_mask;
 
 	int			cmnd_size;
 	u8			cmnd[MAX_COMMAND_SIZE];
@@ -712,25 +744,33 @@ struct fsg_dev {
 	unsigned int		nluns;
 	struct lun		*luns;
 	struct lun		*curlun;
+
+	struct switch_dev sdev;
+
+
 };
 
 typedef void (*fsg_routine_t)(struct fsg_dev *);
+static int open_backing_file(struct lun *curlun, const char *filename);
 
-static int exception_in_progress(struct fsg_dev *fsg)
+static int inline exception_in_progress(struct fsg_dev *fsg)
 {
 	return (fsg->state > FSG_STATE_IDLE);
 }
 
 /* Make bulk-out requests be divisible by the maxpacket size */
-static void set_bulk_out_req_length(struct fsg_dev *fsg,
+static void inline set_bulk_out_req_length(struct fsg_dev *fsg,
 		struct fsg_buffhd *bh, unsigned int length)
 {
 	unsigned int	rem;
 
 	bh->bulk_out_intended_length = length;
 	rem = length % fsg->bulk_out_maxpacket;
-	if (rem > 0)
-		length += fsg->bulk_out_maxpacket - rem;
+
+	//GigaHsu : for CBW (Bulk Out Prepare 31 bytes or MaxPacketSize ?)
+	if ((rem > 0)) // && (length != 31))
+        length += fsg->bulk_out_maxpacket - rem;
+
 	bh->outreq->length = length;
 }
 
@@ -742,42 +782,92 @@ static void	close_all_backing_files(struct fsg_dev *fsg);
 
 
 /*-------------------------------------------------------------------------*/
+static void dump_msg_cbw(struct fsg_dev *fsg, const char *label,
+		const u8 *buf, unsigned int length)
+{
+	unsigned int	start, num, i;
+	char		line[52], *p;
+
+	if (length >= 512)
+		return;
+
+    //if(label == "bulk-out")
+    //   INFO(fsg, "%s, length %u:\n", label, length);
+    //else
+   	   DBG(fsg, "%s, length %u:\n", label, length);
+
+	start = 0;
+	while (length > 0) {
+		num = min(length, 16u);
+		p = line;
+		for (i = 0; i < num; ++i) {
+			if (i == 8)
+				*p++ = ' ';
+			sprintf(p, " %02x", buf[i]);
+			p += 3;
+		}
+		*p = 0;
+		printk(KERN_DEBUG "%6x: %s\n", start, line);
+		buf += num;
+		start += num;
+		length -= num;
+	}
+}
+
 
 #ifdef DUMP_MSGS
 
 static void dump_msg(struct fsg_dev *fsg, const char *label,
 		const u8 *buf, unsigned int length)
 {
-	if (length < 512) {
-		DBG(fsg, "%s, length %u:\n", label, length);
-		print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET,
-				16, 1, buf, length, 0);
+	unsigned int	start, num, i;
+	char		line[52], *p;
+
+	if (length >= 512)
+		return;
+
+    //if(label == "bulk-out")
+    //   INFO(fsg, "%s, length %u:\n", label, length);
+    //else
+   	   DBG(fsg, "%s, length %u:\n", label, length);
+
+	start = 0;
+	while (length > 0) {
+		num = min(length, 16u);
+		p = line;
+		for (i = 0; i < num; ++i) {
+			if (i == 8)
+				*p++ = ' ';
+			sprintf(p, " %02x", buf[i]);
+			p += 3;
+		}
+		*p = 0;
+		printk(KERN_DEBUG "%6x: %s\n", start, line);
+		buf += num;
+		start += num;
+		length -= num;
 	}
 }
 
-static void dump_cdb(struct fsg_dev *fsg)
+static void inline dump_cdb(struct fsg_dev *fsg)
 {}
 
 #else
 
-static void dump_msg(struct fsg_dev *fsg, const char *label,
+static void inline dump_msg(struct fsg_dev *fsg, const char *label,
 		const u8 *buf, unsigned int length)
 {}
 
-#ifdef VERBOSE_DEBUG
-
-static void dump_cdb(struct fsg_dev *fsg)
+static void inline dump_cdb(struct fsg_dev *fsg)
 {
-	print_hex_dump(KERN_DEBUG, "SCSI CDB: ", DUMP_PREFIX_NONE,
-			16, 1, fsg->cmnd, fsg->cmnd_size, 0);
+	int	i;
+	char	cmdbuf[3*MAX_COMMAND_SIZE + 1];
+
+	for (i = 0; i < fsg->cmnd_size; ++i)
+		sprintf(cmdbuf + i*3, " %02x", fsg->cmnd[i]);
+	VDBG(fsg, "SCSI CDB: %s\n", cmdbuf);
 }
 
-#else
-
-static void dump_cdb(struct fsg_dev *fsg)
-{}
-
-#endif /* VERBOSE_DEBUG */
 #endif /* DUMP_MSGS */
 
 
@@ -786,9 +876,16 @@ static int fsg_set_halt(struct fsg_dev *fsg, struct usb_ep *ep)
 	const char	*name;
 
 	if (ep == fsg->bulk_in)
+	{
 		name = "bulk-in";
+		fsg->bulk_in_stall = 1;
+
+	}
 	else if (ep == fsg->bulk_out)
+	{
 		name = "bulk-out";
+			fsg->bulk_out_stall = 1;
+	}
 	else
 		name = ep->name;
 	DBG(fsg, "%s set halt\n", name);
@@ -800,29 +897,29 @@ static int fsg_set_halt(struct fsg_dev *fsg, struct usb_ep *ep)
 
 /* Routines for unaligned data access */
 
-static u16 get_be16(u8 *buf)
+static u16 inline get_be16(u8 *buf)
 {
 	return ((u16) buf[0] << 8) | ((u16) buf[1]);
 }
 
-static u32 get_be32(u8 *buf)
+static u32 inline get_be32(u8 *buf)
 {
 	return ((u32) buf[0] << 24) | ((u32) buf[1] << 16) |
 			((u32) buf[2] << 8) | ((u32) buf[3]);
 }
 
-static void put_be16(u8 *buf, u16 val)
+static void inline put_be16(u8 *buf, u16 val)
 {
 	buf[0] = val >> 8;
 	buf[1] = val;
 }
 
-static void put_be32(u8 *buf, u32 val)
+static void inline put_be32(u8 *buf, u32 val)
 {
 	buf[0] = val >> 24;
 	buf[1] = val >> 16;
 	buf[2] = val >> 8;
-	buf[3] = val & 0xff;
+	buf[3] = val;
 }
 
 
@@ -834,10 +931,10 @@ static void put_be32(u8 *buf, u32 val)
  * descriptors are adjusted during fsg_bind().
  */
 #define STRING_MANUFACTURER	1
-#define STRING_PRODUCT		2
-#define STRING_SERIAL		3
-#define STRING_CONFIG		4
-#define STRING_INTERFACE	5
+#define STRING_PRODUCT		  2
+#define STRING_SERIAL	    	3
+#define STRING_CONFIG       4
+#define STRING_INTERFACE    5
 
 /* There is only one configuration. */
 #define	CONFIG_VALUE		1
@@ -848,6 +945,7 @@ device_desc = {
 	.bDescriptorType =	USB_DT_DEVICE,
 
 	.bcdUSB =		__constant_cpu_to_le16(0x0200),
+	//.bcdUSB =		__constant_cpu_to_le16(0x0110),
 	.bDeviceClass =		USB_CLASS_PER_INTERFACE,
 
 	/* The next three values can be overridden by module parameters */
@@ -869,9 +967,14 @@ config_desc = {
 	/* wTotalLength computed by usb_gadget_config_buf() */
 	.bNumInterfaces =	1,
 	.bConfigurationValue =	CONFIG_VALUE,
-	.iConfiguration =	STRING_CONFIG,
+	.iConfiguration      =  STRING_CONFIG,//GigaHsu 2007.6.5 : Add for MSC Compliance Test.
+#ifdef UDC_SELF_POWER
 	.bmAttributes =		USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
-	.bMaxPower =		CONFIG_USB_GADGET_VBUS_DRAW / 2,
+	.bMaxPower =		1,	// self-powered
+#else
+	.bmAttributes =		USB_CONFIG_ATT_ONE,	//bit 7(must be set) + bit 6(self powered) + bit 5(can wakeup) : GigaHsu : same as VT3214
+	.bMaxPower    =		0x32,	// 50 * 2 = 100mA ; GigaHsu : same as VT3214
+#endif
 };
 
 static struct usb_otg_descriptor
@@ -890,10 +993,11 @@ intf_desc = {
 	.bDescriptorType =	USB_DT_INTERFACE,
 
 	.bNumEndpoints =	2,		// Adjusted during fsg_bind()
-	.bInterfaceClass =	USB_CLASS_MASS_STORAGE,
-	.bInterfaceSubClass =	USB_SC_SCSI,	// Adjusted during fsg_bind()
-	.bInterfaceProtocol =	USB_PR_BULK,	// Adjusted during fsg_bind()
-	.iInterface =		STRING_INTERFACE,
+	.bInterfaceClass =	USB_CLASS_MASS_STORAGE, //0x08
+	//.bInterfaceSubClass =	USB_SC_SCSI,	// Adjusted during fsg_bind() //Default : 0x06(Transparent SCSI)
+	.bInterfaceSubClass =	USB_SC_8020, // 0x02(SFF-8020i, MMC-2, ATAPI (CD-ROM)) GigaHsu : same as VT3214
+	.bInterfaceProtocol =	USB_PR_BULK, // Adjusted during fsg_bind() //Default : 0x50(Bulk-only)
+	.iInterface         = STRING_INTERFACE, // GigaHsu 2007.6.5 : Add for MSC Compliance Test.
 };
 
 /* Three full-speed endpoint descriptors: bulk-in, bulk-out,
@@ -940,6 +1044,8 @@ static const struct usb_descriptor_header *fs_function[] = {
 };
 #define FS_FUNCTION_PRE_EP_ENTRIES	2
 
+
+#ifdef	CONFIG_USB_GADGET_DUALSPEED
 
 /*
  * USB 2.0 devices need to expose both high speed and full speed
@@ -1003,28 +1109,30 @@ static const struct usb_descriptor_header *hs_function[] = {
 #define HS_FUNCTION_PRE_EP_ENTRIES	2
 
 /* Maxpacket and other transfer characteristics vary by speed. */
-static struct usb_endpoint_descriptor *
-ep_desc(struct usb_gadget *g, struct usb_endpoint_descriptor *fs,
-		struct usb_endpoint_descriptor *hs)
-{
-	if (gadget_is_dualspeed(g) && g->speed == USB_SPEED_HIGH)
-		return hs;
-	return fs;
-}
+#define ep_desc(g,fs,hs)	(((g)->speed==USB_SPEED_HIGH) ? (hs) : (fs))
+
+#else
+
+/* If there's no high speed support, always use the full-speed descriptor. */
+#define ep_desc(g,fs,hs)	fs
+
+#endif	/* !CONFIG_USB_GADGET_DUALSPEED */
 
 
 /* The CBI specification limits the serial string to 12 uppercase hexadecimal
  * characters. */
-static char				manufacturer[64];
-static char				serial[13];
+static char				manufacturer[50] ="VIA Technologies, Inc.";
+static char				serial[13] = "000000000001";
+static char       s_config[] = "Bulk-Only Configuration";
+static char       s_interface[] = "Bulk-Only Interface";
 
 /* Static strings, in UTF-8 (for simplicity we use only ASCII characters) */
 static struct usb_string		strings[] = {
 	{STRING_MANUFACTURER,	manufacturer},
 	{STRING_PRODUCT,	longname},
 	{STRING_SERIAL,		serial},
-	{STRING_CONFIG,		"Self-powered"},
-	{STRING_INTERFACE,	"Mass Storage"},
+	{STRING_CONFIG,   s_config},
+	{STRING_INTERFACE, s_interface},
 	{}
 };
 
@@ -1034,6 +1142,9 @@ static struct usb_gadget_strings	stringtab = {
 };
 
 
+//add by kevin, the signal doesn't work, i have no idea!!
+int signal_ispendding=0;
+
 /*
  * Config descriptors must agree with the code that sets configurations
  * and with code managing interfaces and their altsettings.  They must
@@ -1042,23 +1153,30 @@ static struct usb_gadget_strings	stringtab = {
 static int populate_config_buf(struct usb_gadget *gadget,
 		u8 *buf, u8 type, unsigned index)
 {
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 	enum usb_device_speed			speed = gadget->speed;
+#endif
 	int					len;
 	const struct usb_descriptor_header	**function;
 
 	if (index > 0)
 		return -EINVAL;
 
-	if (gadget_is_dualspeed(gadget) && type == USB_DT_OTHER_SPEED_CONFIG)
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+	if (type == USB_DT_OTHER_SPEED_CONFIG)
 		speed = (USB_SPEED_FULL + USB_SPEED_HIGH) - speed;
-	if (gadget_is_dualspeed(gadget) && speed == USB_SPEED_HIGH)
+	if (speed == USB_SPEED_HIGH)
 		function = hs_function;
 	else
+#endif
 		function = fs_function;
 
 	/* for now, don't advertise srp-only devices */
-	if (!gadget_is_otg(gadget))
+	if (!gadget->is_otg)
 		function++;
+
+	   config_desc.bmAttributes = USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER;
+	   config_desc.bMaxPower = 1;	// self-powered
 
 	len = usb_gadget_config_buf(&config_desc, buf, EP0_BUFSIZE, function);
 	((struct usb_config_descriptor *) buf)->bDescriptorType = type;
@@ -1070,7 +1188,6 @@ static int populate_config_buf(struct usb_gadget *gadget,
 
 /* These routines may be called in process context or in_irq */
 
-/* Caller must hold fsg->lock */
 static void wakeup_thread(struct fsg_dev *fsg)
 {
 	/* Tell the main thread that something has happened */
@@ -1088,12 +1205,18 @@ static void raise_exception(struct fsg_dev *fsg, enum fsg_state new_state)
 	 * If a lower-or-equal priority exception is in progress, preempt it
 	 * and notify the main thread by sending it a signal. */
 	spin_lock_irqsave(&fsg->lock, flags);
-	if (fsg->state <= new_state) {
+//	if (fsg->state <= new_state) {
+	if ((fsg->state <= new_state) || ((fsg->state == 5) && (new_state == 4))) {
 		fsg->exception_req_tag = fsg->ep0_req_tag;
 		fsg->state = new_state;
-		if (fsg->thread_task)
+		if (fsg->thread_task){
 			send_sig_info(SIGUSR1, SEND_SIG_FORCED,
 					fsg->thread_task);
+			signal_ispendding=1;
+
+				wakeup_thread(fsg);
+
+		}
 	}
 	spin_unlock_irqrestore(&fsg->lock, flags);
 }
@@ -1109,11 +1232,88 @@ static void raise_exception(struct fsg_dev *fsg, enum fsg_state new_state)
 static void fsg_disconnect(struct usb_gadget *gadget)
 {
 	struct fsg_dev		*fsg = get_gadget_data(gadget);
+	struct lun		*curlun;
+    int i;
 
 	DBG(fsg, "disconnect or port reset\n");
 	raise_exception(fsg, FSG_STATE_DISCONNECT);
-}
 
+	for (i = 0; i < fsg->nluns; ++i)
+ 	{
+	   curlun = &fsg->luns[i];
+       //down_write(&fsg->filesem);
+//	   if (file[i] && *file[i])  //modified by Neil on 20100426
+           if (mod_data.file[i] && *mod_data.file[i])
+	   {
+//--> added by howayhuo on 20100430
+//Don't cloase the backing file of loop device
+	       printk("------- Execute fsg_disconnect (i = %d) ------\n", i);
+	       printk("mod_data.file[%d] = %s\n", i, mod_data.file[i]);
+	       if(strstr(mod_data.file[i], "loop")) //Do nothing when it is loop device
+	       {
+	           printk("Ignore loop device disconnect\n");
+	           continue;
+	       }
+//<-- end add
+	        //loff_t			file_offset;
+	        //unsigned int		amount;
+	        //ssize_t			nread;
+	        //unsigned char   test_buf[512];
+            //int			rc;
+	        /*
+		 	if ((rc = open_backing_file(curlun, file[i])) != 0)
+			{
+			    //if (!mod_data.removable)
+				//    goto out;
+				//close_backing_file(curlun);
+				curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				return -EINVAL;
+		    }
+		    else
+		        curlun->unit_attention_data = curlun->sense_data = SS_NO_SENSE;
+		    */
+		    /*
+		    nread = 0;
+		    amount = 512;
+		    file_offset = 0;
+		   	nread = vfs_read(curlun->filp, (char __user *) test_buf, amount, &file_offset);
+
+		   	if(nread == 512)
+		   	{
+		   	    if(curlun->media_present == 0)
+		   	    {
+		   	      if ((rc = open_backing_file(curlun, file[fsg->lun])) != 0)
+			      {
+			        curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				    curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				    //return -EINVAL;
+			      }
+			      else
+			      {
+		            curlun->unit_attention_data = curlun->sense_data = SS_NOT_READY_TO_READY_TRANSITION;
+		            fsync_sub(curlun);
+		   	      }
+
+		   	      VDBG(fsg, "SC_TEST_UNIT_READY  nread(%d)\n", nread);
+		   	    }
+		   	}
+		   	else
+		   	*/
+		   	{
+		   	    if(curlun->media_present == 1)
+		   	    {
+  		   	      curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				  curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				  VDBG(fsg, "SC_TEST_UNIT_READY  nread(%d)\n", nread);
+				  close_backing_file(curlun);
+				  //return -EINVAL;
+				}
+		   	}
+		}
+	    //up_write(&fsg->filesem);
+	}
+}
 
 static int ep0_queue(struct fsg_dev *fsg)
 {
@@ -1123,7 +1323,7 @@ static int ep0_queue(struct fsg_dev *fsg)
 	if (rc != 0 && rc != -ESHUTDOWN) {
 
 		/* We can't do much more than wait for a reset */
-		WARNING(fsg, "error in submission: %s --> %d\n",
+		WARN(fsg, "error in submission: %s --> %d\n",
 				fsg->ep0->name, rc);
 	}
 	return rc;
@@ -1131,12 +1331,12 @@ static int ep0_queue(struct fsg_dev *fsg)
 
 static void ep0_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	struct fsg_dev		*fsg = ep->driver_data;
+	struct fsg_dev		*fsg = (struct fsg_dev *) ep->driver_data;
 
 	if (req->actual > 0)
 		dump_msg(fsg, fsg->ep0req_name, req->buf, req->actual);
 	if (req->status || req->actual != req->length)
-		DBG(fsg, "%s --> %d, %u/%u\n", __func__,
+		DBG(fsg, "%s --> %d, %u/%u\n", __FUNCTION__,
 				req->status, req->actual, req->length);
 	if (req->status == -ECONNRESET)		// Request was cancelled
 		usb_ep_fifo_flush(ep);
@@ -1153,11 +1353,11 @@ static void ep0_complete(struct usb_ep *ep, struct usb_request *req)
 
 static void bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	struct fsg_dev		*fsg = ep->driver_data;
-	struct fsg_buffhd	*bh = req->context;
+	struct fsg_dev		*fsg = (struct fsg_dev *) ep->driver_data;
+	struct fsg_buffhd	*bh = (struct fsg_buffhd *) req->context;
 
 	if (req->status || req->actual != req->length)
-		DBG(fsg, "%s --> %d, %u/%u\n", __func__,
+		DBG(fsg, "%s --> %d, %u/%u\n", __FUNCTION__,
 				req->status, req->actual, req->length);
 	if (req->status == -ECONNRESET)		// Request was cancelled
 		usb_ep_fifo_flush(ep);
@@ -1173,16 +1373,22 @@ static void bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
 
 static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	struct fsg_dev		*fsg = ep->driver_data;
-	struct fsg_buffhd	*bh = req->context;
+	struct fsg_dev		*fsg = (struct fsg_dev *) ep->driver_data;
+	struct fsg_buffhd	*bh = (struct fsg_buffhd *) req->context;
 
 	dump_msg(fsg, "bulk-out", req->buf, req->actual);
 	if (req->status || req->actual != bh->bulk_out_intended_length)
-		DBG(fsg, "%s --> %d, %u/%u\n", __func__,
+		DBG(fsg, "%s --> %d, %u/%u\n", __FUNCTION__,
 				req->status, req->actual,
 				bh->bulk_out_intended_length);
 	if (req->status == -ECONNRESET)		// Request was cancelled
 		usb_ep_fifo_flush(ep);
+
+  if(req->status == 0x12345678)
+  {
+      fsg->bad_write_dma = 1;
+      req->status = 0;
+  }
 
 	/* Hold the lock while we update the request and buffer states */
 	smp_wmb();
@@ -1197,11 +1403,11 @@ static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 #ifdef CONFIG_USB_FILE_STORAGE_TEST
 static void intr_in_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	struct fsg_dev		*fsg = ep->driver_data;
-	struct fsg_buffhd	*bh = req->context;
+	struct fsg_dev		*fsg = (struct fsg_dev *) ep->driver_data;
+	struct fsg_buffhd	*bh = (struct fsg_buffhd *) req->context;
 
 	if (req->status || req->actual != req->length)
-		DBG(fsg, "%s --> %d, %u/%u\n", __func__,
+		DBG(fsg, "%s --> %d, %u/%u\n", __FUNCTION__,
 				req->status, req->actual, req->length);
 	if (req->status == -ECONNRESET)		// Request was cancelled
 		usb_ep_fifo_flush(ep);
@@ -1259,7 +1465,7 @@ static void received_cbi_adsc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 
 	/* Save the command for later */
 	if (fsg->cbbuf_cmnd_size)
-		WARNING(fsg, "CB[I] overwriting previous command\n");
+		WARN(fsg, "CB[I] overwriting previous command\n");
 	fsg->cbbuf_cmnd_size = req->actual;
 	memcpy(fsg->cbbuf_cmnd, req->buf, fsg->cbbuf_cmnd_size);
 
@@ -1279,7 +1485,6 @@ static int class_setup_req(struct fsg_dev *fsg,
 	struct usb_request	*req = fsg->ep0req;
 	int			value = -EOPNOTSUPP;
 	u16			w_index = le16_to_cpu(ctrl->wIndex);
-	u16                     w_value = le16_to_cpu(ctrl->wValue);
 	u16			w_length = le16_to_cpu(ctrl->wLength);
 
 	if (!fsg->config)
@@ -1292,9 +1497,15 @@ static int class_setup_req(struct fsg_dev *fsg,
 		case USB_BULK_RESET_REQUEST:
 			if (ctrl->bRequestType != (USB_DIR_OUT |
 					USB_TYPE_CLASS | USB_RECIP_INTERFACE))
+			{
+				fsg_set_halt(fsg, fsg->ep0);
 				break;
-			if (w_index != 0 || w_value != 0) {
-				value = -EDOM;
+			}
+
+			if ((ctrl->wIndex != 0) || (ctrl->wValue != 0) || (ctrl->wLength != 0))//for complicance test
+			{
+				//value = -EDOM;
+				fsg_set_halt(fsg, fsg->ep0);
 				break;
 			}
 
@@ -1308,11 +1519,18 @@ static int class_setup_req(struct fsg_dev *fsg,
 		case USB_BULK_GET_MAX_LUN_REQUEST:
 			if (ctrl->bRequestType != (USB_DIR_IN |
 					USB_TYPE_CLASS | USB_RECIP_INTERFACE))
-				break;
-			if (w_index != 0 || w_value != 0) {
-				value = -EDOM;
+			{
+				fsg_set_halt(fsg, fsg->ep0);
 				break;
 			}
+
+			if ((ctrl->wIndex != 0) || (ctrl->wValue != 0) || (ctrl->wLength != 1))//for complicance test
+			{
+				//value = -EDOM;
+				fsg_set_halt(fsg, fsg->ep0);
+				break;
+			}
+
 			VDBG(fsg, "get max LUN\n");
 			*(u8 *) req->buf = fsg->nluns - 1;
 			value = 1;
@@ -1328,7 +1546,7 @@ static int class_setup_req(struct fsg_dev *fsg,
 			if (ctrl->bRequestType != (USB_DIR_OUT |
 					USB_TYPE_CLASS | USB_RECIP_INTERFACE))
 				break;
-			if (w_index != 0 || w_value != 0) {
+			if (w_index != 0) {
 				value = -EDOM;
 				break;
 			}
@@ -1363,11 +1581,13 @@ static int standard_setup_req(struct fsg_dev *fsg,
 	int			value = -EOPNOTSUPP;
 	u16			w_index = le16_to_cpu(ctrl->wIndex);
 	u16			w_value = le16_to_cpu(ctrl->wValue);
+	u16 temp16;
+
+  memset (req->buf , 0, 256);
 
 	/* Usually this just stores reply data in the pre-allocated ep0 buffer,
 	 * but config change events will also reconfigure hardware. */
 	switch (ctrl->bRequest) {
-
 	case USB_REQ_GET_DESCRIPTOR:
 		if (ctrl->bRequestType != (USB_DIR_IN | USB_TYPE_STANDARD |
 				USB_RECIP_DEVICE))
@@ -1376,25 +1596,41 @@ static int standard_setup_req(struct fsg_dev *fsg,
 
 		case USB_DT_DEVICE:
 			VDBG(fsg, "get device descriptor\n");
+
+			if (fsg->gadget->is_dualspeed)
+			    device_desc.bcdUSB = __constant_cpu_to_le16(0x0200);
+	 		else
+	            device_desc.bcdUSB = __constant_cpu_to_le16(0x0110);
+
 			value = sizeof device_desc;
 			memcpy(req->buf, &device_desc, value);
 			break;
+#ifdef CONFIG_USB_GADGET_DUALSPEED
 		case USB_DT_DEVICE_QUALIFIER:
 			VDBG(fsg, "get device qualifier\n");
-			if (!gadget_is_dualspeed(fsg->gadget))
+			if (!fsg->gadget->is_dualspeed)
+			{
+				fsg_set_halt(fsg, fsg->ep0);
 				break;
+			}
 			value = sizeof dev_qualifier;
 			memcpy(req->buf, &dev_qualifier, value);
 			break;
 
 		case USB_DT_OTHER_SPEED_CONFIG:
 			VDBG(fsg, "get other-speed config descriptor\n");
-			if (!gadget_is_dualspeed(fsg->gadget))
+			if (!fsg->gadget->is_dualspeed)
+			{
+				fsg_set_halt(fsg, fsg->ep0);
 				break;
+			}
 			goto get_config;
+#endif
 		case USB_DT_CONFIG:
 			VDBG(fsg, "get configuration descriptor\n");
-get_config:
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+		get_config:
+#endif
 			value = populate_config_buf(fsg->gadget,
 					req->buf,
 					w_value >> 8,
@@ -1414,7 +1650,7 @@ get_config:
 	/* One config, two speeds */
 	case USB_REQ_SET_CONFIGURATION:
 		if (ctrl->bRequestType != (USB_DIR_OUT | USB_TYPE_STANDARD |
-				USB_RECIP_DEVICE))
+				USB_RECIP_DEVICE)) //USB_RECIP_DEVICE(0x00)
 			break;
 		VDBG(fsg, "set configuration\n");
 		if (w_value == CONFIG_VALUE || w_value == 0) {
@@ -1431,7 +1667,13 @@ get_config:
 				USB_RECIP_DEVICE))
 			break;
 		VDBG(fsg, "get configuration\n");
-		*(u8 *) req->buf = fsg->config;
+
+		//Marked by Giga Hsu
+		//if(fsg->new_config != fsg->config)
+    //	*(u8 *) req->buf = fsg->new_config;
+		//else
+		  *(u8 *) req->buf = fsg->config;
+
 		value = 1;
 		break;
 
@@ -1461,7 +1703,64 @@ get_config:
 		VDBG(fsg, "get interface\n");
 		*(u8 *) req->buf = 0;
 		value = 1;
-		break;
+	break;
+
+	case USB_REQ_SET_FEATURE:
+
+		 if ((ctrl->wIndex & 0x7f) == (fs_bulk_in_desc.bEndpointAddress & 0x7F))
+		 {
+			   fsg->bulk_in_stall = 1;
+		 }
+		 else if ((ctrl->wIndex & 0x7f) == (fs_bulk_out_desc.bEndpointAddress & 0x7F))
+		 {
+		       fsg->bulk_out_stall = 1;
+		 }
+
+		 VDBG(fsg, "SET_FEATURE\n");
+		 value = DELAYED_STATUS;
+
+	break;
+
+	case USB_REQ_CLEAR_FEATURE:
+
+		 if ((ctrl->wIndex & 0x7f) == (fs_bulk_in_desc.bEndpointAddress & 0x7F))
+		 {
+			   fsg->bulk_in_stall = 0;
+		 }
+		 else if ((ctrl->wIndex & 0x7f) == (fs_bulk_out_desc.bEndpointAddress & 0x7F))
+		 {
+		       fsg->bulk_out_stall = 0;
+		 }
+
+		 VDBG(fsg, "CLEAR_FEATURE\n");
+		 value = DELAYED_STATUS;
+	break;
+
+	case USB_REQ_GET_STATUS:
+		 VDBG(fsg, "get status\n");
+		 value = 2;
+
+		 if (ctrl->bRequestType == (USB_DIR_IN|USB_RECIP_ENDPOINT))
+		 {
+		   if ((ctrl->wIndex & 0x7f) == (fs_bulk_in_desc.bEndpointAddress & 0x7F))
+		   {
+		     temp16 = fsg->bulk_in_stall;
+			 memcpy(req->buf, &temp16, value);
+		   }
+		   else if ((ctrl->wIndex & 0x7f) == (fs_bulk_out_desc.bEndpointAddress & 0x7F))
+		   {
+	 	     temp16 = fsg->bulk_out_stall;
+			 memcpy(req->buf, &temp16, value);
+		   }
+		 }
+		 else if (ctrl->bRequestType == (USB_DIR_IN|USB_RECIP_DEVICE))
+		 {
+	        temp16 = 0x0001;//D0 : Self-Powered
+  		    memcpy(req->buf, &temp16, value);
+		 }
+
+
+	break;
 
 	default:
 		VDBG(fsg,
@@ -1522,7 +1821,6 @@ static void start_transfer(struct fsg_dev *fsg, struct usb_ep *ep,
 		dump_msg(fsg, "bulk-in", req->buf, req->length);
 	else if (ep == fsg->intr_in)
 		dump_msg(fsg, "intr-in", req->buf, req->length);
-
 	spin_lock_irq(&fsg->lock);
 	*pbusy = 1;
 	*state = BUF_STATE_BUSY;
@@ -1538,7 +1836,7 @@ static void start_transfer(struct fsg_dev *fsg, struct usb_ep *ep,
 		 * submissions if DMA is enabled. */
 		if (rc != -ESHUTDOWN && !(rc == -EOPNOTSUPP &&
 						req->length == 0))
-			WARNING(fsg, "error in submission: %s --> %d\n",
+			WARN(fsg, "error in submission: %s --> %d\n",
 					ep->name, rc);
 	}
 }
@@ -1552,7 +1850,7 @@ static int sleep_thread(struct fsg_dev *fsg)
 	for (;;) {
 		try_to_freeze();
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (signal_pending(current)) {
+		if (signal_pending(current)||signal_ispendding) {
 			rc = -EINTR;
 			break;
 		}
@@ -1584,27 +1882,32 @@ static int do_read(struct fsg_dev *fsg)
 	 * not too big */
 	if (fsg->cmnd[0] == SC_READ_6)
 		lba = (fsg->cmnd[1] << 16) | get_be16(&fsg->cmnd[2]);
-	else {
+	else
+	{
 		lba = get_be32(&fsg->cmnd[2]);
 
 		/* We allow DPO (Disable Page Out = don't save data in the
 		 * cache) and FUA (Force Unit Access = don't read from the
 		 * cache), but we don't implement them. */
-		if ((fsg->cmnd[1] & ~0x18) != 0) {
+		if ((fsg->cmnd[1] & ~0x18) != 0)
+		{
 			curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 			return -EINVAL;
 		}
 	}
-	if (lba >= curlun->num_sectors) {
+
+	if (lba >= curlun->num_sectors)
+	{
 		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 		return -EINVAL;
 	}
-	file_offset = ((loff_t) lba) << 9;
+	file_offset = ((loff_t) lba) << 9; //*512
 
 	/* Carry out the file reads */
-	amount_left = fsg->data_size_from_cmnd;
+	amount_left = fsg->data_size_from_cmnd;//SCSI Command (Device)
+
 	if (unlikely(amount_left == 0))
-		return -EIO;		// No default reply
+		return -EIO;		// No default reply  : 0xFFFFFFFB
 
 	for (;;) {
 
@@ -1627,8 +1930,7 @@ static int do_read(struct fsg_dev *fsg)
 		/* Wait for the next buffer to become available */
 		bh = fsg->next_buffhd_to_fill;
 		while (bh->state != BUF_STATE_EMPTY) {
-			rc = sleep_thread(fsg);
-			if (rc)
+			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
 		}
 
@@ -1638,7 +1940,6 @@ static int do_read(struct fsg_dev *fsg)
 			curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 			curlun->sense_data_info = file_offset >> 9;
-			curlun->info_valid = 1;
 			bh->inreq->length = 0;
 			bh->state = BUF_STATE_FULL;
 			break;
@@ -1649,11 +1950,10 @@ static int do_read(struct fsg_dev *fsg)
 		nread = vfs_read(curlun->filp,
 				(char __user *) bh->buf,
 				amount, &file_offset_tmp);
-		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
-				(unsigned long long) file_offset,
-				(int) nread);
-		if (signal_pending(current))
+
+		if (signal_pending(current)){
 			return -EINTR;
+		}
 
 		if (nread < 0) {
 			LDBG(curlun, "error in file read: %d\n",
@@ -1674,7 +1974,6 @@ static int do_read(struct fsg_dev *fsg)
 		if (nread < amount) {
 			curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
 			curlun->sense_data_info = file_offset >> 9;
-			curlun->info_valid = 1;
 			break;
 		}
 
@@ -1769,7 +2068,6 @@ static int do_write(struct fsg_dev *fsg)
 				curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 				curlun->sense_data_info = usb_offset >> 9;
-				curlun->info_valid = 1;
 				continue;
 			}
 			amount -= (amount & 511);
@@ -1812,9 +2110,14 @@ static int do_write(struct fsg_dev *fsg)
 			if (bh->outreq->status != 0) {
 				curlun->sense_data = SS_COMMUNICATION_FAILURE;
 				curlun->sense_data_info = file_offset >> 9;
-				curlun->info_valid = 1;
 				break;
 			}
+
+      if(fsg->bad_write_dma == 1)//GigaHsu : Patch OTG HW DMA Write Bug
+      {
+        curlun->sense_data = SS_WRITE_ERROR_OTG;
+				curlun->sense_data_info = file_offset >> 9;
+		  }
 
 			amount = bh->outreq->actual;
 			if (curlun->file_length - file_offset < amount) {
@@ -1854,7 +2157,6 @@ static int do_write(struct fsg_dev *fsg)
 			if (nwritten < amount) {
 				curlun->sense_data = SS_WRITE_ERROR;
 				curlun->sense_data_info = file_offset >> 9;
-				curlun->info_valid = 1;
 				break;
 			}
 
@@ -1867,8 +2169,7 @@ static int do_write(struct fsg_dev *fsg)
 		}
 
 		/* Wait for something to happen */
-		rc = sleep_thread(fsg);
-		if (rc)
+		if ((rc = sleep_thread(fsg)) != 0)
 			return rc;
 	}
 
@@ -1883,10 +2184,26 @@ static int do_write(struct fsg_dev *fsg)
 static int fsync_sub(struct lun *curlun)
 {
 	struct file	*filp = curlun->filp;
+	struct inode	*inode;
+	int		rc, err;
 
 	if (curlun->ro || !filp)
 		return 0;
-	return vfs_fsync(filp, filp->f_path.dentry, 1);
+	if (!filp->f_op->fsync)
+		return -EINVAL;
+
+	inode = filp->f_dentry->d_inode;
+	mutex_lock(&inode->i_mutex);
+	rc = filemap_fdatawrite(inode->i_mapping);
+	err = filp->f_op->fsync(filp, filp->f_dentry, 1);
+	if (!rc)
+		rc = err;
+	err = filemap_fdatawait(inode->i_mapping);
+	if (!rc)
+		rc = err;
+	mutex_unlock(&inode->i_mutex);
+	VLDBG(curlun, "fdatasync -> %d\n", rc);
+	return rc;
 }
 
 static void fsync_all(struct fsg_dev *fsg)
@@ -1916,10 +2233,10 @@ static int do_synchronize_cache(struct fsg_dev *fsg)
 static void invalidate_sub(struct lun *curlun)
 {
 	struct file	*filp = curlun->filp;
-	struct inode	*inode = filp->f_path.dentry->d_inode;
+	struct inode	*inode = filp->f_dentry->d_inode;
 	unsigned long	rc;
 
-	rc = invalidate_mapping_pages(inode->i_mapping, 0, -1);
+	rc = invalidate_inode_pages(inode->i_mapping);
 	VLDBG(curlun, "invalidate_inode_pages -> %ld\n", rc);
 }
 
@@ -1975,14 +2292,13 @@ static int do_verify(struct fsg_dev *fsg)
 		 * And don't try to read past the end of the file.
 		 * If this means reading 0 then we were asked to read
 		 * past the end of file. */
-		amount = min((unsigned int) amount_left, mod_data.buflen);
+		amount = min((unsigned int) amount_left, mod_data.buflen);  //mod_data.buflen(16384)
 		amount = min((loff_t) amount,
 				curlun->file_length - file_offset);
 		if (amount == 0) {
 			curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 			curlun->sense_data_info = file_offset >> 9;
-			curlun->info_valid = 1;
 			break;
 		}
 
@@ -2009,7 +2325,6 @@ static int do_verify(struct fsg_dev *fsg)
 		if (nread == 0) {
 			curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
 			curlun->sense_data_info = file_offset >> 9;
-			curlun->info_valid = 1;
 			break;
 		}
 		file_offset += nread;
@@ -2026,28 +2341,23 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	u8	*buf = (u8 *) bh->buf;
 
 	static char vendor_id[] = "Linux   ";
-	static char product_disk_id[] = "File-Stor Gadget";
-	static char product_cdrom_id[] = "File-CD Gadget  ";
+	static char product_id[] = "File-Stor Gadget";
 
 	if (!fsg->curlun) {		// Unsupported LUNs are okay
 		fsg->bad_lun_okay = 1;
 		memset(buf, 0, 36);
 		buf[0] = 0x7f;		// Unsupported, no device-type
-		buf[4] = 31;		// Additional length
 		return 36;
 	}
 
-	memset(buf, 0, 8);
-	buf[0] = (mod_data.cdrom ? TYPE_CDROM : TYPE_DISK);
+	memset(buf, 0, 8);	// Non-removable, direct-access device
 	if (mod_data.removable)
 		buf[1] = 0x80;
 	buf[2] = 2;		// ANSI SCSI level 2
 	buf[3] = 2;		// SCSI-2 INQUIRY data format
 	buf[4] = 31;		// Additional length
 				// No special options
-	sprintf(buf + 8, "%-8s%-16s%04x", vendor_id,
-			(mod_data.cdrom ? product_cdrom_id :
-				product_disk_id),
+	sprintf(buf + 8, "%-8s%-16s%04x", vendor_id, product_id,
 			mod_data.release);
 	return 36;
 }
@@ -2058,7 +2368,6 @@ static int do_request_sense(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	struct lun	*curlun = fsg->curlun;
 	u8		*buf = (u8 *) bh->buf;
 	u32		sd, sdinfo;
-	int		valid;
 
 	/*
 	 * From the SCSI-2 spec., section 7.9 (Unit attention condition):
@@ -2086,18 +2395,15 @@ static int do_request_sense(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 		fsg->bad_lun_okay = 1;
 		sd = SS_LOGICAL_UNIT_NOT_SUPPORTED;
 		sdinfo = 0;
-		valid = 0;
 	} else {
 		sd = curlun->sense_data;
 		sdinfo = curlun->sense_data_info;
-		valid = curlun->info_valid << 7;
 		curlun->sense_data = SS_NO_SENSE;
 		curlun->sense_data_info = 0;
-		curlun->info_valid = 0;
 	}
 
 	memset(buf, 0, 18);
-	buf[0] = valid | 0x70;			// Valid, current error
+	buf[0] = 0x80 | 0x70;			// Valid, current error
 	buf[2] = SK(sd);
 	put_be32(&buf[3], sdinfo);		// Sense information
 	buf[7] = 18 - 8;			// Additional sense length
@@ -2113,9 +2419,10 @@ static int do_read_capacity(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	u32		lba = get_be32(&fsg->cmnd[2]);
 	int		pmi = fsg->cmnd[8];
 	u8		*buf = (u8 *) bh->buf;
-
+	//printk("do_read_capacity 0x%x",curlun->num_sectors);
 	/* Check the PMI and LBA fields */
 	if (pmi > 1 || (pmi == 0 && lba != 0)) {
+		//printk("do_read error =====================================%d\n",__LINE__);
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
 	}
@@ -2123,75 +2430,6 @@ static int do_read_capacity(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	put_be32(&buf[0], curlun->num_sectors - 1);	// Max logical block
 	put_be32(&buf[4], 512);				// Block length
 	return 8;
-}
-
-
-static void store_cdrom_address(u8 *dest, int msf, u32 addr)
-{
-	if (msf) {
-		/* Convert to Minutes-Seconds-Frames */
-		addr >>= 2;		/* Convert to 2048-byte frames */
-		addr += 2*75;		/* Lead-in occupies 2 seconds */
-		dest[3] = addr % 75;	/* Frames */
-		addr /= 75;
-		dest[2] = addr % 60;	/* Seconds */
-		addr /= 60;
-		dest[1] = addr;		/* Minutes */
-		dest[0] = 0;		/* Reserved */
-	} else {
-		/* Absolute sector */
-		put_be32(dest, addr);
-	}
-}
-
-static int do_read_header(struct fsg_dev *fsg, struct fsg_buffhd *bh)
-{
-	struct lun	*curlun = fsg->curlun;
-	int		msf = fsg->cmnd[1] & 0x02;
-	u32		lba = get_be32(&fsg->cmnd[2]);
-	u8		*buf = (u8 *) bh->buf;
-
-	if ((fsg->cmnd[1] & ~0x02) != 0) {		/* Mask away MSF */
-		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
-		return -EINVAL;
-	}
-	if (lba >= curlun->num_sectors) {
-		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
-		return -EINVAL;
-	}
-
-	memset(buf, 0, 8);
-	buf[0] = 0x01;		/* 2048 bytes of user data, rest is EC */
-	store_cdrom_address(&buf[4], msf, lba);
-	return 8;
-}
-
-
-static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
-{
-	struct lun	*curlun = fsg->curlun;
-	int		msf = fsg->cmnd[1] & 0x02;
-	int		start_track = fsg->cmnd[6];
-	u8		*buf = (u8 *) bh->buf;
-
-	if ((fsg->cmnd[1] & ~0x02) != 0 ||		/* Mask away MSF */
-			start_track > 1) {
-		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
-		return -EINVAL;
-	}
-
-	memset(buf, 0, 20);
-	buf[1] = (20-2);		/* TOC data length */
-	buf[2] = 1;			/* First track number */
-	buf[3] = 1;			/* Last track number */
-	buf[5] = 0x16;			/* Data track, copying allowed */
-	buf[6] = 0x01;			/* Only track is number 1 */
-	store_cdrom_address(&buf[8], msf, 0);
-
-	buf[13] = 0x16;			/* Lead-out track is data */
-	buf[14] = 0xAA;			/* Lead-out track number */
-	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
-	return 20;
 }
 
 
@@ -2322,7 +2560,7 @@ static int do_start_stop(struct fsg_dev *fsg)
 	return 0;
 }
 
-
+/*
 static int do_prevent_allow(struct fsg_dev *fsg)
 {
 	struct lun	*curlun = fsg->curlun;
@@ -2344,21 +2582,23 @@ static int do_prevent_allow(struct fsg_dev *fsg)
 	curlun->prevent_medium_removal = prevent;
 	return 0;
 }
-
+*/
 
 static int do_read_format_capacities(struct fsg_dev *fsg,
 			struct fsg_buffhd *bh)
 {
 	struct lun	*curlun = fsg->curlun;
 	u8		*buf = (u8 *) bh->buf;
+	int i;
 
 	buf[0] = buf[1] = buf[2] = 0;
 	buf[3] = 8;		// Only the Current/Maximum Capacity Descriptor
 	buf += 4;
-
 	put_be32(&buf[0], curlun->num_sectors);		// Number of blocks
 	put_be32(&buf[4], 512);				// Block length
 	buf[4] = 0x02;					// Current capacity
+
+
 	return 12;
 }
 
@@ -2384,7 +2624,7 @@ static int halt_bulk_in_endpoint(struct fsg_dev *fsg)
 		VDBG(fsg, "delayed bulk-in endpoint halt\n");
 	while (rc != 0) {
 		if (rc != -EAGAIN) {
-			WARNING(fsg, "usb_ep_set_halt -> %d\n", rc);
+			WARN(fsg, "usb_ep_set_halt -> %d\n", rc);
 			rc = 0;
 			break;
 		}
@@ -2395,19 +2635,19 @@ static int halt_bulk_in_endpoint(struct fsg_dev *fsg)
 		rc = usb_ep_set_halt(fsg->bulk_in);
 	}
 	return rc;
+
 }
 
-static int wedge_bulk_in_endpoint(struct fsg_dev *fsg)
+static int halt_bulk_out_endpoint(struct fsg_dev *fsg)
 {
 	int	rc;
 
-	DBG(fsg, "bulk-in set wedge\n");
-	rc = usb_ep_set_wedge(fsg->bulk_in);
+	rc = fsg_set_halt(fsg, fsg->bulk_out);
 	if (rc == -EAGAIN)
-		VDBG(fsg, "delayed bulk-in endpoint wedge\n");
+		VDBG(fsg, "delayed bulk-out endpoint halt\n");
 	while (rc != 0) {
 		if (rc != -EAGAIN) {
-			WARNING(fsg, "usb_ep_set_wedge -> %d\n", rc);
+			WARN(fsg, "usb_ep_set_halt -> %d\n", rc);
 			rc = 0;
 			break;
 		}
@@ -2415,7 +2655,7 @@ static int wedge_bulk_in_endpoint(struct fsg_dev *fsg)
 		/* Wait for a short time and then try again */
 		if (msleep_interruptible(100) != 0)
 			return -EINTR;
-		rc = usb_ep_set_wedge(fsg->bulk_in);
+		rc = usb_ep_set_halt(fsg->bulk_out);
 	}
 	return rc;
 }
@@ -2433,8 +2673,7 @@ static int pad_with_zeros(struct fsg_dev *fsg)
 
 		/* Wait for the next buffer to be free */
 		while (bh->state != BUF_STATE_EMPTY) {
-			rc = sleep_thread(fsg);
-			if (rc)
+			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
 		}
 
@@ -2494,8 +2733,7 @@ static int throw_away_data(struct fsg_dev *fsg)
 		}
 
 		/* Otherwise wait for something to happen */
-		rc = sleep_thread(fsg);
-		if (rc)
+		if ((rc = sleep_thread(fsg)) != 0)
 			return rc;
 	}
 	return 0;
@@ -2506,6 +2744,8 @@ static int finish_reply(struct fsg_dev *fsg)
 {
 	struct fsg_buffhd	*bh = fsg->next_buffhd_to_fill;
 	int			rc = 0;
+
+
 
 	switch (fsg->data_dir) {
 	case DATA_DIR_NONE:
@@ -2541,13 +2781,16 @@ static int finish_reply(struct fsg_dev *fsg)
 		 * data_size), and the command failed (invalid LUN or
 		 * sense data is set), then halt the bulk-in endpoint
 		 * instead. */
-		else if (!transport_is_bbb()) {
-			if (mod_data.can_stall &&
-					fsg->residue == fsg->data_size &&
-	(!fsg->curlun || fsg->curlun->sense_data != SS_NO_SENSE)) {
+		else if (!transport_is_bbb())
+		{
+			if (mod_data.can_stall &&	fsg->residue == fsg->data_size &&
+	       (!fsg->curlun || fsg->curlun->sense_data != SS_NO_SENSE))
+	    {
 				bh->state = BUF_STATE_EMPTY;
 				rc = halt_bulk_in_endpoint(fsg);
-			} else {
+			}
+			else
+			{
 				bh->inreq->zero = 1;
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
 						&bh->inreq_busy, &bh->state);
@@ -2558,14 +2801,17 @@ static int finish_reply(struct fsg_dev *fsg)
 		/* For Bulk-only, if we're allowed to stall then send the
 		 * short packet and halt the bulk-in endpoint.  If we can't
 		 * stall, pad out the remaining data with 0's. */
-		else {
-			if (mod_data.can_stall) {
+		else
+		{
+		 	if (mod_data.can_stall)
+		 	{
 				bh->inreq->zero = 1;
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
-						&bh->inreq_busy, &bh->state);
+			            		&bh->inreq_busy, &bh->state);
 				fsg->next_buffhd_to_fill = bh->next;
 				rc = halt_bulk_in_endpoint(fsg);
-			} else
+			}
+			else
 				rc = pad_with_zeros(fsg);
 		}
 		break;
@@ -2576,6 +2822,8 @@ static int finish_reply(struct fsg_dev *fsg)
 		if (fsg->residue == 0)
 			;		// Nothing to receive
 
+    else if (fsg->data_size == 0) //GigaHsu : Patch Compliance Test Write Items - warnings(1)
+			;		//Nothing to receive
 		/* Did the host stop sending unexpectedly early? */
 		else if (fsg->short_packet_received) {
 			raise_exception(fsg, FSG_STATE_ABORT_BULK_OUT);
@@ -2602,6 +2850,8 @@ static int finish_reply(struct fsg_dev *fsg)
 			rc = throw_away_data(fsg);
 		break;
 	}
+
+	VDBG(fsg, "finish_reply() rc = 0x%08X \n", rc);
 	return rc;
 }
 
@@ -2614,36 +2864,47 @@ static int send_status(struct fsg_dev *fsg)
 	u8			status = USB_STATUS_PASS;
 	u32			sd, sdinfo = 0;
 
+    VDBG(fsg, "send_status()\n");
+
 	/* Wait for the next buffer to become available */
 	bh = fsg->next_buffhd_to_fill;
-	while (bh->state != BUF_STATE_EMPTY) {
-		rc = sleep_thread(fsg);
-		if (rc)
-			return rc;
+	while (bh->state != BUF_STATE_EMPTY)
+	{
+		if ((rc = sleep_thread(fsg)) != 0)
+	       return rc;
 	}
 
-	if (curlun) {
+	if (curlun)
+	{
 		sd = curlun->sense_data;
 		sdinfo = curlun->sense_data_info;
-	} else if (fsg->bad_lun_okay)
+	}
+	else if (fsg->bad_lun_okay)
 		sd = SS_NO_SENSE;
 	else
 		sd = SS_LOGICAL_UNIT_NOT_SUPPORTED;
 
-	if (fsg->phase_error) {
+	if (fsg->phase_error)
+	{
 		DBG(fsg, "sending phase-error status\n");
 		status = USB_STATUS_PHASE_ERROR;
 		sd = SS_INVALID_COMMAND;
-	} else if (sd != SS_NO_SENSE) {
+	}
+	else if (sd != SS_NO_SENSE)
+	{
 		DBG(fsg, "sending command-failure status\n");
 		status = USB_STATUS_FAIL;
-		VDBG(fsg, "  sense data: SK x%02x, ASC x%02x, ASCQ x%02x;"
-				"  info x%x\n",
-				SK(sd), ASC(sd), ASCQ(sd), sdinfo);
+		VDBG(fsg, "  sense data: SK x%02x, ASC x%02x, ASCQ x%02x;" "  info x%x\n",
+				                         SK(sd), ASC(sd), ASCQ(sd), sdinfo);
 	}
 
+  if(fsg->bad_cbw_okay || fsg->bad_write_dma)
+  {
+     status = USB_STATUS_FAIL;
+  }
+
 	if (transport_is_bbb()) {
-		struct bulk_cs_wrap	*csw = bh->buf;
+		struct bulk_cs_wrap	*csw = (struct bulk_cs_wrap *) bh->buf;
 
 		/* Store and send the Bulk-only CSW */
 		csw->Signature = __constant_cpu_to_le32(USB_BULK_CS_SIG);
@@ -2662,7 +2923,8 @@ static int send_status(struct fsg_dev *fsg)
 		return 0;
 
 	} else {			// USB_PR_CBI
-		struct interrupt_data	*buf = bh->buf;
+		struct interrupt_data	*buf = (struct interrupt_data *)
+						bh->buf;
 
 		/* Store and send the Interrupt data.  UFI sends the ASC
 		 * and ASCQ bytes.  Everything else sends a Type (which
@@ -2678,6 +2940,7 @@ static int send_status(struct fsg_dev *fsg)
 
 		fsg->intr_buffhd = bh;		// Point to the right buffhd
 		fsg->intreq->buf = bh->inreq->buf;
+		fsg->intreq->dma = bh->inreq->dma;
 		fsg->intreq->context = bh;
 		start_transfer(fsg, fsg->intr_in, fsg->intreq,
 				&fsg->intreq_busy, &bh->state);
@@ -2689,7 +2952,6 @@ static int send_status(struct fsg_dev *fsg)
 
 
 /*-------------------------------------------------------------------------*/
-
 /* Check whether the command is properly formed and whether its data size
  * and direction agree with the values we already have. */
 static int check_command(struct fsg_dev *fsg, int cmnd_size,
@@ -2702,6 +2964,8 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 	char			hdlen[20];
 	struct lun		*curlun;
 
+
+   VDBG(fsg, "check_command()******************BEGIN*********************\n");
 	/* Adjust the expected cmnd_size for protocol encapsulation padding.
 	 * Transparent SCSI doesn't pad. */
 	if (protocol_is_scsi())
@@ -2718,10 +2982,12 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 		cmnd_size = 12;
 
 	hdlen[0] = 0;
+
 	if (fsg->data_dir != DATA_DIR_UNKNOWN)
 		sprintf(hdlen, ", H%c=%u", dirletter[(int) fsg->data_dir],
 				fsg->data_size);
-	VDBG(fsg, "SCSI command: %s;  Dc=%d, D%c=%u;  Hc=%d%s\n",
+
+	VDBG(fsg, "SCSI command: %s;  Dc=%d, D%c=%u;  Hc=%d%s\n",  //Dc=10, Di=512;  Hc=10, Hn=0
 			name, cmnd_size, dirletter[(int) data_dir],
 			fsg->data_size_from_cmnd, fsg->cmnd_size, hdlen);
 
@@ -2729,55 +2995,141 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 	 * and size. */
 	if (fsg->data_size_from_cmnd == 0)
 		data_dir = DATA_DIR_NONE;
-	if (fsg->data_dir == DATA_DIR_UNKNOWN) {	// CB or CBI
+
+	if (fsg->data_dir == DATA_DIR_UNKNOWN)
+	{	// CB or CBI
 		fsg->data_dir = data_dir;
 		fsg->data_size = fsg->data_size_from_cmnd;
-
-	} else {					// Bulk-only
-		if (fsg->data_size < fsg->data_size_from_cmnd) {
-
+		fsg->residue = fsg->usb_amount_left = fsg->data_size;
+	}
+	else
+	{	// Bulk-only
+		//  Host(CBWDataTransferLength) : fsg->data_size < Device(SCSI) : fsg->data_size_from_cmnd
+		//  MSC Compliance Test case 2(READ), case 3(WRITE) ; but case 7 not involve.
+	  if ((fsg->data_size == 0) && (fsg->data_size < fsg->data_size_from_cmnd))//DATA_DIR_NONE
+		{
 			/* Host data size < Device data size is a phase error.
 			 * Carry out the command, but only transfer as much
 			 * as we are allowed. */
-			fsg->data_size_from_cmnd = fsg->data_size;
-			fsg->phase_error = 1;
+			fsg->residue = fsg->usb_amount_left = (fsg->data_size_from_cmnd - fsg->data_size);//for dCSWDataResidue
+			fsg->data_size_from_cmnd = fsg->data_size;//(0)
+	  	    halt_bulk_in_endpoint(fsg);//for READ(10) WRITE(10) : CBWDataTransferLength = 0
+			fsg->phase_error = 1; //Perform a Reset Recovery.
+		}
+
+		//GigaHsu for MSC compliance test	: case 4(READ)
+		//Host(CBWDataTransferLength) : fsg->data_size > Device(SCSI) : fsg->data_size_from_cmnd
+		else if((fsg->data_size_from_cmnd == 0) && (fsg->data_size > fsg->data_size_from_cmnd))
+		{
+		  if(fsg->cmnd[0] == SC_READ_10)
+		 	{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;//(0)
+			  halt_bulk_in_endpoint(fsg);
+			  fsg->bad_cbw_okay = 1;
+			}
+			else if(fsg->cmnd[0] == SC_TEST_UNIT_READY)//GigaHsu for MSC compliance test	: case 9(TEST UNIT READY)
+		 	{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;//(0)
+
+		    if(fsg->data_dir == DATA_DIR_TO_HOST)
+		    	 halt_bulk_in_endpoint(fsg);
+		    else
+		       halt_bulk_out_endpoint(fsg);
+
+			  fsg->bad_cbw_okay = 1;
+			}
+
+		}
+		//GigaHsu for MSC compliance test	: case 5(READ)
+		//Host(CBWDataTransferLength) : fsg->data_size > Device(SCSI) : fsg->data_size_from_cmnd
+		else if((fsg->data_size_from_cmnd != 0) && (fsg->data_size > fsg->data_size_from_cmnd))
+		{
+			if(fsg->cmnd[0] == SC_READ_10)
+		 	{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;
+			  halt_bulk_in_endpoint(fsg);
+			  fsg->bad_cbw_okay = 1;
+			}
+			else if(fsg->cmnd[0] == SC_WRITE_10)//GigaHsu for MSC compliance test	: case 11(WRITE)
+		 	{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;
+			  halt_bulk_out_endpoint(fsg);
+			  fsg->bad_cbw_okay = 1;
+			}
+		}
+		//GigaHsu for MSC compliance test	: case 7(READ)
+		//Host(CBWDataTransferLength) : fsg->data_size < Device(SCSI) : fsg->data_size_from_cmnd
+		else if((fsg->data_size != 0) && (fsg->data_size < fsg->data_size_from_cmnd))
+		{
+			if(fsg->cmnd[0] == SC_READ_10)
+		 	{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		        fsg->data_size = fsg->data_size_from_cmnd = 0;
+			    halt_bulk_in_endpoint(fsg);
+			  	fsg->phase_error = 1; //Perform a Reset Recovery.
+			}
+			else if(fsg->cmnd[0] == SC_WRITE_10)//GigaHsu for MSC compliance test	: case 13(WRITE)
+		 	{
+		 	  fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		      fsg->data_size = fsg->data_size_from_cmnd = 0;
+			  halt_bulk_out_endpoint(fsg);
+			  fsg->phase_error = 1; //Perform a Reset Recovery.
+			}
+		}
+		else
+		{
+			fsg->residue = fsg->usb_amount_left = fsg->data_size;
 		}
 	}
-	fsg->residue = fsg->usb_amount_left = fsg->data_size;
+
+	//fsg->residue = fsg->usb_amount_left = fsg->data_size;
 
 	/* Conflicting data directions is a phase error */
-	if (fsg->data_dir != data_dir && fsg->data_size_from_cmnd > 0) {
-		fsg->phase_error = 1;
-		return -EINVAL;
+	if ((fsg->data_dir != data_dir) && fsg->data_size_from_cmnd > 0)
+	{ // fsg->data_dir(HOST - CBW) != data_dir (DEVICE - SCSI)
+		if(fsg->cmnd[0] == SC_WRITE_10) ////GigaHsu for MSC compliance test	: case 8(WRITE)
+		{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;
+			  halt_bulk_in_endpoint(fsg);// fsg->data_dir = DATA_DIR_TO_HOST (IN)
+		  	fsg->phase_error = 1; //Perform a Reset Recovery.
+		}
+		else if(fsg->cmnd[0] == SC_READ_10) ////GigaHsu for MSC compliance test	: case 10(READ)
+		{
+		 		fsg->residue = fsg->usb_amount_left = (fsg->data_size - 0);
+		    fsg->data_size = fsg->data_size_from_cmnd = 0;
+		  	halt_bulk_out_endpoint(fsg);// fsg->data_dir = DATA_DIR_FROM_HOST (OUT)
+		  	fsg->phase_error = 1; //Perform a Reset Recovery.
+		}
+		else
+		{
+		  fsg->phase_error = 1;
+		  VDBG(fsg, "check_command()- Conflicting data directions is a phase error..........\n");
+		  return -EINVAL;
+		}
 	}
 
 	/* Verify the length of the command itself */
+
 	if (cmnd_size != fsg->cmnd_size) {
 
-		/* Special case workaround: There are plenty of buggy SCSI
-		 * implementations. Many have issues with cbw->Length
-		 * field passing a wrong command size. For those cases we
-		 * always try to work around the problem by using the length
-		 * sent by the host side provided it is at least as large
-		 * as the correct command length.
-		 * Examples of such cases would be MS-Windows, which issues
-		 * REQUEST SENSE with cbw->Length == 12 where it should
-		 * be 6, and xbox360 issuing INQUIRY, TEST UNIT READY and
-		 * REQUEST SENSE with cbw->Length == 10 where it should
-		 * be 6 as well.
-		 */
-		if (cmnd_size <= fsg->cmnd_size) {
-			DBG(fsg, "%s is buggy! Expected length %d "
-					"but we got %d\n", name,
-					cmnd_size, fsg->cmnd_size);
+		//  Special case workaround: MS-Windows issues REQUEST SENSE
+		//  with cbw->Length == 12 (it should be 6).
+		//if (fsg->cmnd[0] == SC_REQUEST_SENSE && fsg->cmnd_size == 12)
 			cmnd_size = fsg->cmnd_size;
-		} else {
-			fsg->phase_error = 1;
-			return -EINVAL;
-		}
+		//else {
+		//	fsg->phase_error = 1;
+		//	VDBG(fsg, "check_command()- SC_REQUEST_SENSE..........\n");
+		//	return -EINVAL;
+		//}
 	}
 
-	/* Check that the LUN values are consistent */
+
+	/* Check that the LUN values are oonsistent */
 	if (transport_is_bbb()) {
 		if (fsg->lun != lun)
 			DBG(fsg, "using LUN %d from CBW, "
@@ -2787,21 +3139,25 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 		fsg->lun = lun;		// Use LUN from the command
 
 	/* Check the LUN */
-	if (fsg->lun >= 0 && fsg->lun < fsg->nluns) {
+	if (fsg->lun >= 0 && fsg->lun < fsg->nluns)
+	{
 		fsg->curlun = curlun = &fsg->luns[fsg->lun];
-		if (fsg->cmnd[0] != SC_REQUEST_SENSE) {
+		if (fsg->cmnd[0] != SC_REQUEST_SENSE)
+		{
 			curlun->sense_data = SS_NO_SENSE;
 			curlun->sense_data_info = 0;
-			curlun->info_valid = 0;
 		}
-	} else {
+	}
+	else
+	{
 		fsg->curlun = curlun = NULL;
 		fsg->bad_lun_okay = 0;
 
 		/* INQUIRY and REQUEST SENSE commands are explicitly allowed
 		 * to use unsupported LUNs; all others may not. */
 		if (fsg->cmnd[0] != SC_INQUIRY &&
-				fsg->cmnd[0] != SC_REQUEST_SENSE) {
+				fsg->cmnd[0] != SC_REQUEST_SENSE)
+		{
 			DBG(fsg, "unsupported LUN %d\n", fsg->lun);
 			return -EINVAL;
 		}
@@ -2814,6 +3170,8 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 			fsg->cmnd[0] != SC_REQUEST_SENSE) {
 		curlun->sense_data = curlun->unit_attention_data;
 		curlun->unit_attention_data = SS_NO_SENSE;
+		VDBG(fsg, "check_command()- SS_NO_SENSE..........\n");
+		//Giga Hsu 2007.5.8 marked
 		return -EINVAL;
 	}
 
@@ -2823,6 +3181,7 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 		if (fsg->cmnd[i] && !(mask & (1 << i))) {
 			if (curlun)
 				curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+			VDBG(fsg, "check_command()- SS_INVALID_FIELD_IN_CDB..........\n");
 			return -EINVAL;
 		}
 	}
@@ -2830,13 +3189,136 @@ static int check_command(struct fsg_dev *fsg, int cmnd_size,
 	/* If the medium isn't mounted and the command needs to access
 	 * it, return an error. */
 	if (curlun && !backing_file_is_open(curlun) && needs_medium) {
-		curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
-		return -EINVAL;
-	}
+	    int			rc;
 
+		curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+		VDBG(fsg, "check_command()- SS_MEDIUM_NOT_PRESENT..........\n");
+//return -EINVAL;
+
+		//for (i = 0; i < fsg->nluns; ++i)
+		{
+		  //curlun = &fsg->luns[i];
+
+          //down_write(&fsg->filesem);
+		  if (mod_data.file[fsg->lun] && *mod_data.file[fsg->lun])
+	      {
+
+		 	if(curlun->media_present == 0)
+		   	{
+		   	   if ((rc = open_backing_file(curlun, mod_data.file[fsg->lun])) != 0)
+			   {
+			        curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				    curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+ 									 return -EINVAL;
+			   }
+			   else
+			   {
+  						 curlun->unit_attention_data = curlun->sense_data = SS_NOT_READY_TO_READY_TRANSITION;
+		            fsync_sub(curlun);
+		       }
+		   	}
+		  }
+	    }
+	}
+	//GigaHsu 2007_12_24_B: Add for checking SD Card insert or removed.
+	if(fsg->cmnd[0] == SC_TEST_UNIT_READY)
+	{
+
+	   //for (i = 0; i < fsg->nluns; ++i)
+ 	   {
+		  //curlun = &fsg->luns[i];
+          //down_write(&fsg->filesem);
+		  if (mod_data.file[fsg->lun] && *mod_data.file[fsg->lun])
+	      {
+	        loff_t			file_offset;
+	        unsigned int		amount;
+	        ssize_t			nread;
+	        unsigned char   test_buf[512];
+            int			rc;
+	        /*
+		 	if ((rc = open_backing_file(curlun, file[i])) != 0)
+			{
+			    //if (!mod_data.removable)
+				//    goto out;
+				//close_backing_file(curlun);
+				curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				return -EINVAL;
+		    }
+		    else
+		        curlun->unit_attention_data = curlun->sense_data = SS_NO_SENSE;
+		    */
+		    nread = 0;
+		    amount = 512;
+		    file_offset = 0;
+		   	nread = vfs_read(curlun->filp, (char __user *) test_buf, amount, &file_offset);
+
+		   	if(nread == 512)
+		   	{
+		   	    if(curlun->media_present == 0)
+		   	    {
+
+		   	      if ((rc = open_backing_file(curlun, mod_data.file[fsg->lun])) != 0)
+			      {
+			        curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				    curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				    return -EINVAL;
+			      }
+			      else
+			      {
+
+		            curlun->unit_attention_data = curlun->sense_data = SS_NOT_READY_TO_READY_TRANSITION;
+		            fsync_sub(curlun);
+		   	      }
+
+		   	      VDBG(fsg, "SC_TEST_UNIT_READY  nread(%d)\n", nread);
+		   	    }
+		   	}
+		   	else
+		   	{
+
+		   	    if(curlun->media_present == 1)
+		   	    {
+  		   	      curlun->sense_data = SS_MEDIUM_NOT_PRESENT;
+				  curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+				  VDBG(fsg, "SC_TEST_UNIT_READY  nread(%d)\n", nread);
+				  close_backing_file(curlun);
+				  return -EINVAL;
+				}
+		   	}
+		  }
+		  //up_write(&fsg->filesem);
+	   }
+	}
+	//GigaHsu 2007_12_24_E
+
+    VDBG(fsg, "check_command()******************END*********************\n");
 	return 0;
 }
+#ifdef CONFIG_USB_MERGE_MSC_ETH
 
+#include <linux/interrupt.h>
+
+static struct tasklet_struct	RDS_tasklet;
+static struct work_struct	RDS_detect;
+static unsigned int RDS_status;
+
+static void vt3426_tasklet(unsigned int status)
+{
+	schedule_work(&RDS_detect);
+}
+
+static void run_sbin_rds_hotplug(unsigned int status)
+{
+    char *argv [3];
+
+    argv [0] = "/bin/sh";
+    argv [1] = "/wmt_gadget/wmt_rndis.script";
+    argv [2] = NULL;
+    call_usermodehelper(argv[0], argv, NULL, 0);
+}
+
+#endif
 
 static int do_scsi_command(struct fsg_dev *fsg)
 {
@@ -2851,13 +3333,12 @@ static int do_scsi_command(struct fsg_dev *fsg)
 	/* Wait for the next buffer to become available for data or status */
 	bh = fsg->next_buffhd_to_drain = fsg->next_buffhd_to_fill;
 	while (bh->state != BUF_STATE_EMPTY) {
-		rc = sleep_thread(fsg);
-		if (rc)
+		if ((rc = sleep_thread(fsg)) != 0)
 			return rc;
-	}
+		}
 	fsg->phase_error = 0;
 	fsg->short_packet_received = 0;
-
+	//printk("scsi 0x%x\n",fsg->cmnd[0]);
 	down_read(&fsg->filesem);	// We're using the backing file
 	switch (fsg->cmnd[0]) {
 
@@ -2866,7 +3347,9 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		if ((reply = check_command(fsg, 6, DATA_DIR_TO_HOST,
 				(1<<4), 0,
 				"INQUIRY")) == 0)
+				{
 			reply = do_inquiry(fsg, bh);
+		}
 		break;
 
 	case SC_MODE_SELECT_6:
@@ -2906,7 +3389,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		if ((reply = check_command(fsg, 6, DATA_DIR_NONE,
 				(1<<4), 0,
 				"PREVENT-ALLOW MEDIUM REMOVAL")) == 0)
-			reply = do_prevent_allow(fsg);
+			reply = 0;//do_prevent_allow(fsg);
 		break;
 
 	case SC_READ_6:
@@ -2919,7 +3402,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		break;
 
 	case SC_READ_10:
-		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]) << 9;
+		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]) << 9;//*512 bytes for Device SCSI Commmand.
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 				(1<<1) | (0xf<<2) | (3<<7), 1,
 				"READ(10)")) == 0)
@@ -2942,32 +3425,17 @@ static int do_scsi_command(struct fsg_dev *fsg)
 			reply = do_read_capacity(fsg, bh);
 		break;
 
-	case SC_READ_HEADER:
-		if (!mod_data.cdrom)
-			goto unknown_cmnd;
-		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
-		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
-				(3<<7) | (0x1f<<1), 1,
-				"READ HEADER")) == 0)
-			reply = do_read_header(fsg, bh);
-		break;
-
-	case SC_READ_TOC:
-		if (!mod_data.cdrom)
-			goto unknown_cmnd;
-		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
-		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
-				(7<<6) | (1<<1), 1,
-				"READ TOC")) == 0)
-			reply = do_read_toc(fsg, bh);
-		break;
-
 	case SC_READ_FORMAT_CAPACITIES:
 		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
+
 		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
 				(3<<7), 1,
 				"READ FORMAT CAPACITIES")) == 0)
+		 {
 			reply = do_read_format_capacities(fsg, bh);
+			//VDBG(fsg, "do_read_format_capacities() before reply =0x%08X\n", reply);
+		 }
+		 //VDBG(fsg, "XXXXX reply =0x%08X\n", reply);
 		break;
 
 	case SC_REQUEST_SENSE:
@@ -3021,7 +3489,7 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		break;
 
 	case SC_WRITE_10:
-		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]) << 9;
+		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]) << 9; //*512 bytes;
 		if ((reply = check_command(fsg, 10, DATA_DIR_FROM_HOST,
 				(1<<1) | (0xf<<2) | (3<<7), 1,
 				"WRITE(10)")) == 0)
@@ -3045,9 +3513,15 @@ static int do_scsi_command(struct fsg_dev *fsg)
 	case SC_RESERVE:
 	case SC_SEND_DIAGNOSTIC:
 		// Fall through
-
+#ifdef CONFIG_USB_MERGE_MSC_ETH
+    case 0xe4:
+        printk("Get SCSI command 0xE4\n");
+        tasklet_init(&RDS_tasklet, vt3426_tasklet, (unsigned long)RDS_status);
+	    INIT_WORK(&RDS_detect, run_sbin_rds_hotplug, RDS_status);
+        tasklet_schedule((struct tasklet_struct *)(&RDS_tasklet));
+        printk("schedule the tasklet\n");
+#endif
 	default:
- unknown_cmnd:
 		fsg->data_size_from_cmnd = 0;
 		sprintf(unknown, "Unknown x%02x", fsg->cmnd[0]);
 		if ((reply = check_command(fsg, fsg->cmnd_size,
@@ -3057,15 +3531,24 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		}
 		break;
 	}
+
 	up_read(&fsg->filesem);
 
 	if (reply == -EINTR || signal_pending(current))
 		return -EINTR;
 
 	/* Set up the single reply buffer for finish_reply() */
+
+
 	if (reply == -EINVAL)
+	{
 		reply = 0;		// Error reply length
-	if (reply >= 0 && fsg->data_dir == DATA_DIR_TO_HOST) {
+		//VDBG(fsg, "dreply == -EINVAL \n");
+  }
+
+	VDBG(fsg, "do_scsi_command() reply =0x%08X \n", reply);
+
+	if (reply >= 0 && fsg->data_dir == DATA_DIR_TO_HOST) {//READ(10)
 		reply = min((u32) reply, fsg->data_size_from_cmnd);
 		bh->inreq->length = reply;
 		bh->state = BUF_STATE_FULL;
@@ -3081,37 +3564,84 @@ static int do_scsi_command(struct fsg_dev *fsg)
 static int received_cbw(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
 	struct usb_request	*req = bh->outreq;
-	struct bulk_cb_wrap	*cbw = req->buf;
-
-	/* Was this a real packet?  Should it be ignored? */
-	if (req->status || test_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags))
+	struct bulk_cb_wrap	*cbw = (struct bulk_cb_wrap *) req->buf;
+  u8 temp32bytes[31];
+	/* Was this a real packet? */
+	if (req->status)
 		return -EINVAL;
 
 	/* Is the CBW valid? */
 	if (req->actual != USB_BULK_CB_WRAP_LEN ||
-			cbw->Signature != __constant_cpu_to_le32(
-				USB_BULK_CB_SIG)) {
-		DBG(fsg, "invalid CBW: len %u sig 0x%x\n",
-				req->actual,
-				le32_to_cpu(cbw->Signature));
+			cbw->Signature != __constant_cpu_to_le32(USB_BULK_CB_SIG))
+  {
+      /*
+       {
+            u32 *tmp0;
+            tmp0 = (u32 *) 0xD8110044; // the GPIO
+            *tmp0 &= 0xFFFFFBFF;
+            DBG(fsg, "Trigger GPIO 0xD8110044[0x%08X]\n",*tmp0);
+       }
+			 */
+		  DBG(fsg, "Invalid CBW: len %u sig 0x%x\n",
+			req->actual, le32_to_cpu(cbw->Signature));
 
-		/* The Bulk-only spec says we MUST stall the IN endpoint
-		 * (6.6.1), so it's unavoidable.  It also says we must
-		 * retain this state until the next reset, but there's
-		 * no way to tell the controller driver it should ignore
-		 * Clear-Feature(HALT) requests.
-		 *
-		 * We aren't required to halt the OUT endpoint; instead
-		 * we can simply accept and discard any data received
-		 * until the next reset. */
-		wedge_bulk_in_endpoint(fsg);
-		set_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags);
-		return -EINVAL;
+         dump_msg_cbw(fsg, "bulk-out", req->buf, req->actual);
+
+		 /* The Bulk-only spec says we MUST stall the bulk pipes!
+		  * If we want to avoid stalls, set a flag so that we will
+		  * clear the endpoint halts at the next reset.
+		  */
+
+		 //GigaHsu : patch HW DMA Write Issue
+
+		 memset(temp32bytes, 0, 31);
+
+		 temp32bytes[0] =  0xEF; //Fixed ERROR CBW Signature Pattern for halt bulk.
+		 temp32bytes[1] =  0xBE;
+		 temp32bytes[2] =  0xAD;
+		 temp32bytes[3] =  0xDE;
+
+		 if((memcmp(temp32bytes, req->buf, 4) == 0) || (req->actual != USB_BULK_CB_WRAP_LEN))
+		 {  // GigaHsu MSC Compliance Test V1.3 Error Recovery Test : cbw->Signature
+
+		    if(memcmp(req->buf, temp32bytes, 4) != 0)
+		   	   memcpy(req->buf, temp32bytes, 4);
+
+		    if (!mod_data.can_stall)
+		         set_bit(CLEAR_BULK_HALTS, &fsg->atomic_bitflags);
+
+		    halt_bulk_in_endpoint(fsg);
+		    fsg_set_halt(fsg, fsg->bulk_out);
+
+		    return -EINVAL;
+		 }
+		 //memset(temp32bytes, 0, 31);
+		 else //if(memcmp(temp32bytes, req->buf, 31) == 0)
+		 {
+		 	 //patch VT8430 OTG DMA Write issue : Test Unit Ready.
+		   fsg->bad_cbw_okay = 1;
+		   fsg->bad_lun_okay = 1;
+	  	 halt_bulk_in_endpoint(fsg);
+	  	 //fsg_set_halt(fsg, fsg->bulk_out);
+		   //return -EINVAL;
+		   fsg->cmnd_size = 6;
+
+		   memcpy(fsg->cmnd, cbw->CDB, fsg->cmnd_size);
+
+	     fsg->data_size = 0;
+
+	     if (fsg->data_size == 0)
+		       fsg->data_dir = DATA_DIR_NONE;
+
+	     //fsg->lun = cbw->Lun;
+	     //fsg->tag = cbw->Tag;
+	     return 0;
+		 }
 	}
 
 	/* Is the CBW meaningful? */
 	if (cbw->Lun >= MAX_LUNS || cbw->Flags & ~USB_BULK_IN_FLAG ||
-			cbw->Length <= 0 || cbw->Length > MAX_COMMAND_SIZE) {
+			cbw->Length < 6 || cbw->Length > MAX_COMMAND_SIZE) {
 		DBG(fsg, "non-meaningful CBW: lun = %u, flags = 0x%x, "
 				"cmdlen %u\n",
 				cbw->Lun, cbw->Flags, cbw->Length);
@@ -3128,15 +3658,20 @@ static int received_cbw(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	/* Save the command for later */
 	fsg->cmnd_size = cbw->Length;
 	memcpy(fsg->cmnd, cbw->CDB, fsg->cmnd_size);
+
 	if (cbw->Flags & USB_BULK_IN_FLAG)
 		fsg->data_dir = DATA_DIR_TO_HOST;
 	else
 		fsg->data_dir = DATA_DIR_FROM_HOST;
+
 	fsg->data_size = le32_to_cpu(cbw->DataTransferLength);
-	if (fsg->data_size == 0)
+
+	if (fsg->data_size == 0) //MSC Compliance Test : Host(CBWDataTransferLength = 0 => Direction = N/A)
 		fsg->data_dir = DATA_DIR_NONE;
+
 	fsg->lun = cbw->Lun;
 	fsg->tag = cbw->Tag;
+
 	return 0;
 }
 
@@ -3146,19 +3681,27 @@ static int get_next_command(struct fsg_dev *fsg)
 	struct fsg_buffhd	*bh;
 	int			rc = 0;
 
+#ifdef FLUSH_CBW_BUFFER
+	u32 i, temp32;
+	u32 *tmp;
+#endif
+
 	if (transport_is_bbb()) {
 
 		/* Wait for the next buffer to become available */
 		bh = fsg->next_buffhd_to_fill;
 		while (bh->state != BUF_STATE_EMPTY) {
-			rc = sleep_thread(fsg);
-			if (rc)
+			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
-		}
+			}
+   	//GigaHsu 2007-5-28 : patch HW issue : zero CBW buffer
+   	memset (bh->outreq->buf , 0, 31);//Clear CBW
+
+   	fsg->bad_cbw_okay = 0;
+   	fsg->bad_write_dma = 0;
 
 		/* Queue a request to read a Bulk-only CBW */
 		set_bulk_out_req_length(fsg, bh, USB_BULK_CB_WRAP_LEN);
-		bh->outreq->short_not_ok = 1;
 		start_transfer(fsg, fsg->bulk_out, bh->outreq,
 				&bh->outreq_busy, &bh->state);
 
@@ -3168,23 +3711,71 @@ static int get_next_command(struct fsg_dev *fsg)
 
 		/* Wait for the CBW to arrive */
 		while (bh->state != BUF_STATE_FULL) {
-			rc = sleep_thread(fsg);
-			if (rc)
+			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
-		}
-		smp_rmb();
+			}
 		rc = received_cbw(fsg, bh);
+
+#ifdef FLUSH_CBW_BUFFER
+  	memset (bh->outreq->buf , 0x00, 32);//Clear CBW
+    for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+  	memset (bh->outreq->buf , 0xFF, 32);//Clear CBW
+  	for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+  	memset (bh->outreq->buf , 0x00, 32);//Clear CBW
+    for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+    memset (bh->outreq->buf , 0xFF, 32);//Clear CBW
+    for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+    memset (bh->outreq->buf , 0x00, 32);//Clear CBW
+    for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+    memset (bh->outreq->buf , 0xFF, 32);//Clear CBW
+    for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+
+  	memset (bh->outreq->buf , 0x00, 32);//Clear CBW
+	  for(i=0; i<8; i++)
+  	{
+   	    tmp = (u32 *) ((u32)bh->outreq->buf + 4*i);
+	      temp32 = *tmp;
+	  }
+#endif
+
 		bh->state = BUF_STATE_EMPTY;
 
 	} else {		// USB_PR_CB or USB_PR_CBI
 
 		/* Wait for the next command to arrive */
 		while (fsg->cbbuf_cmnd_size == 0) {
-			rc = sleep_thread(fsg);
-			if (rc)
+			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
-		}
-
+			}
 		/* Is the previous status interrupt request still busy?
 		 * The host is allowed to skip reading the status,
 		 * so we must cancel it. */
@@ -3220,7 +3811,7 @@ static int enable_endpoint(struct fsg_dev *fsg, struct usb_ep *ep,
 static int alloc_request(struct fsg_dev *fsg, struct usb_ep *ep,
 		struct usb_request **preq)
 {
-	*preq = usb_ep_alloc_request(ep, GFP_ATOMIC);
+	*preq = usb_ep_alloc_request(ep, GFP_KERNEL|GFP_ATOMIC);
 	if (*preq)
 		return 0;
 	ERROR(fsg, "can't allocate request for %s\n", ep->name);
@@ -3291,7 +3882,6 @@ reset:
 		goto reset;
 	fsg->bulk_out_enabled = 1;
 	fsg->bulk_out_maxpacket = le16_to_cpu(d->wMaxPacketSize);
-	clear_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags);
 
 	if (transport_is_cbi()) {
 		d = ep_desc(fsg->gadget, &fs_intr_in_desc, &hs_intr_in_desc);
@@ -3309,6 +3899,7 @@ reset:
 		if ((rc = alloc_request(fsg, fsg->bulk_out, &bh->outreq)) != 0)
 			goto reset;
 		bh->inreq->buf = bh->outreq->buf = bh->buf;
+		bh->inreq->dma = bh->outreq->dma = bh->dma;
 		bh->inreq->context = bh->outreq->context = bh;
 		bh->inreq->complete = bulk_in_complete;
 		bh->outreq->complete = bulk_out_complete;
@@ -3345,8 +3936,12 @@ static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 		rc = do_set_interface(fsg, -1);
 	}
 
+  fsg->bulk_in_stall = 0;
+	fsg->bulk_out_stall = 0;
+
 	/* Enable the interface */
-	if (new_config != 0) {
+	if (new_config != 0)
+	{
 		fsg->config = new_config;
 		if ((rc = do_set_interface(fsg, 0)) != 0)
 			fsg->config = 0;	// Reset on errors
@@ -3359,12 +3954,14 @@ static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 			case USB_SPEED_HIGH:	speed = "high";	break;
 			default: 		speed = "?";	break;
 			}
-			INFO(fsg, "%s speed config #%d\n", speed, fsg->config);
+			DBG(fsg, "%s speed config #%d\n", speed, fsg->config);
 		}
 	}
+	printk("-------------------- do set config\n");
+	switch_set_state(&fsg->sdev, new_config);
+
 	return rc;
 }
-
 
 /*-------------------------------------------------------------------------*/
 
@@ -3380,11 +3977,11 @@ static void handle_exception(struct fsg_dev *fsg)
 	struct lun		*curlun;
 	unsigned int		exception_req_tag;
 	int			rc;
-
 	/* Clear the existing signals.  Anything but SIGUSR1 is converted
 	 * into a high-priority EXIT exception. */
 	for (;;) {
-		sig = dequeue_signal_lock(current, &current->blocked, &info);
+		sig = dequeue_signal_lock(current, &fsg->thread_signal_mask,
+				&info);
 		if (!sig)
 			break;
 		if (sig != SIGUSR1) {
@@ -3414,8 +4011,11 @@ static void handle_exception(struct fsg_dev *fsg)
 		}
 		if (num_active == 0)
 			break;
-		if (sleep_thread(fsg))
+
+		if (sleep_thread(fsg)){
+
 			return;
+			}
 	}
 
 	/* Clear out the controller's fifos */
@@ -3444,13 +4044,13 @@ static void handle_exception(struct fsg_dev *fsg)
 	if (old_state == FSG_STATE_ABORT_BULK_OUT)
 		fsg->state = FSG_STATE_STATUS_PHASE;
 	else {
+
 		for (i = 0; i < fsg->nluns; ++i) {
 			curlun = &fsg->luns[i];
 			curlun->prevent_medium_removal = 0;
 			curlun->sense_data = curlun->unit_attention_data =
 					SS_NO_SENSE;
 			curlun->sense_data_info = 0;
-			curlun->info_valid = 0;
 		}
 		fsg->state = FSG_STATE_IDLE;
 	}
@@ -3473,12 +4073,19 @@ static void handle_exception(struct fsg_dev *fsg)
 		/* In case we were forced against our will to halt a
 		 * bulk endpoint, clear the halt now.  (The SuperH UDC
 		 * requires this.) */
-		if (test_and_clear_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags))
+		if (test_and_clear_bit(CLEAR_BULK_HALTS,
+				&fsg->atomic_bitflags)) {
+
+					fsg->bulk_in_stall = 0;
+					fsg->bulk_out_stall = 0;
+
 			usb_ep_clear_halt(fsg->bulk_in);
+			usb_ep_clear_halt(fsg->bulk_out);
+		}
 
 		if (transport_is_bbb()) {
 			if (fsg->ep0_req_tag == exception_req_tag)
-				ep0_queue(fsg);	// Complete the status stage
+			   	ep0_queue(fsg);	// Complete the status stage
 
 		} else if (transport_is_cbi())
 			send_status(fsg);	// Status by interrupt pipe
@@ -3504,10 +4111,12 @@ static void handle_exception(struct fsg_dev *fsg)
 		rc = do_set_config(fsg, new_config);
 		if (fsg->ep0_req_tag != exception_req_tag)
 			break;
+
 		if (rc != 0)			// STALL on errors
-			fsg_set_halt(fsg, fsg->ep0);
-		else				// Complete the status stage
-			ep0_queue(fsg);
+		  	fsg_set_halt(fsg, fsg->ep0);
+		  else				// Complete the status stage
+	    	ep0_queue(fsg);	//GigaHsu 2007.4.27 cause vt8430 sequence fail while setup command
+			                  //GigaHsu 2007.6.6  for complete status stage.
 		break;
 
 	case FSG_STATE_DISCONNECT:
@@ -3523,6 +4132,8 @@ static void handle_exception(struct fsg_dev *fsg)
 		spin_unlock_irq(&fsg->lock);
 		break;
 	}
+		signal_ispendding = 0;
+
 }
 
 
@@ -3530,22 +4141,20 @@ static void handle_exception(struct fsg_dev *fsg)
 
 static int fsg_main_thread(void *fsg_)
 {
-	struct fsg_dev		*fsg = fsg_;
+	struct fsg_dev		*fsg = (struct fsg_dev *) fsg_;
 
 	/* Allow the thread to be killed by a signal, but set the signal mask
 	 * to block everything but INT, TERM, KILL, and USR1. */
-	allow_signal(SIGINT);
-	allow_signal(SIGTERM);
-	allow_signal(SIGKILL);
-	allow_signal(SIGUSR1);
-
-	/* Allow the thread to be frozen */
-	set_freezable();
+	siginitsetinv(&fsg->thread_signal_mask, sigmask(SIGINT) |
+			sigmask(SIGTERM) | sigmask(SIGKILL) |
+			sigmask(SIGUSR1));
+	sigprocmask(SIG_SETMASK, &fsg->thread_signal_mask, NULL);
 
 	/* Arrange for userspace references to be interpreted as kernel
 	 * pointers.  That way we can pass a kernel pointer to a routine
 	 * that expects a __user pointer and it will work okay. */
 	set_fs(get_ds());
+
 
 	/* The main loop */
 	while (fsg->state != FSG_STATE_TERMINATED) {
@@ -3553,11 +4162,11 @@ static int fsg_main_thread(void *fsg_)
 			handle_exception(fsg);
 			continue;
 		}
-
 		if (!fsg->running) {
 			sleep_thread(fsg);
 			continue;
 		}
+       // fsg_set_halt(fsg, fsg->bulk_out); //couldn't work around! host reset device
 
 		if (get_next_command(fsg))
 			continue;
@@ -3582,6 +4191,7 @@ static int fsg_main_thread(void *fsg_)
 		if (!exception_in_progress(fsg))
 			fsg->state = FSG_STATE_IDLE;
 		spin_unlock_irq(&fsg->lock);
+
 		}
 
 	spin_lock_irq(&fsg->lock);
@@ -3613,8 +4223,8 @@ static int open_backing_file(struct lun *curlun, const char *filename)
 	struct inode			*inode = NULL;
 	loff_t				size;
 	loff_t				num_sectors;
-	loff_t				min_sectors;
 
+        printk("--------------- open_backing_file: filename = %s\n", filename);
 	/* R/W if we can, R/O if we must */
 	ro = curlun->ro;
 	if (!ro) {
@@ -3624,16 +4234,21 @@ static int open_backing_file(struct lun *curlun, const char *filename)
 	}
 	if (ro)
 		filp = filp_open(filename, O_RDONLY | O_LARGEFILE, 0);
+
 	if (IS_ERR(filp)) {
-		LINFO(curlun, "unable to open backing file: %s\n", filename);
+	    //GigaHsu 2008-1-23 removed warning message
+		//LINFO(curlun, "unable to open backing file: %s\n", filename);
+		curlun->media_present = 0;
 		return PTR_ERR(filp);
 	}
+	else
+	    curlun->media_present = 1;
 
 	if (!(filp->f_mode & FMODE_WRITE))
 		ro = 1;
 
-	if (filp->f_path.dentry)
-		inode = filp->f_path.dentry->d_inode;
+	if (filp->f_dentry)
+		inode = filp->f_dentry->d_inode;
 	if (inode && S_ISBLK(inode->i_mode)) {
 		if (bdev_read_only(inode->i_bdev))
 			ro = 1;
@@ -3657,19 +4272,8 @@ static int open_backing_file(struct lun *curlun, const char *filename)
 		rc = (int) size;
 		goto out;
 	}
-	num_sectors = size >> 9;	// File size in 512-byte blocks
-	min_sectors = 1;
-	if (mod_data.cdrom) {
-		num_sectors &= ~3;	// Reduce to a multiple of 2048
-		min_sectors = 300*4;	// Smallest track is 300 frames
-		if (num_sectors >= 256*60*75*4) {
-			num_sectors = (256*60*75 - 1) * 4;
-			LINFO(curlun, "file too big: %s\n", filename);
-			LINFO(curlun, "using only first %d blocks\n",
-					(int) num_sectors);
-		}
-	}
-	if (num_sectors < min_sectors) {
+	num_sectors = size >> 9;	// File size in 512-byte sectors
+	if (num_sectors == 0) {
 		LINFO(curlun, "file too small: %s\n", filename);
 		rc = -ETOOSMALL;
 		goto out;
@@ -3680,7 +4284,10 @@ static int open_backing_file(struct lun *curlun, const char *filename)
 	curlun->filp = filp;
 	curlun->file_length = size;
 	curlun->num_sectors = num_sectors;
-	LDBG(curlun, "open backing file: %s\n", filename);
+//	printk("capacity 0x%x",inode->i_bdev->bd_disk->capacity);
+//	printk("open_backing_file 0x%x 0x%x",curlun->num_sectors,curlun->file_length);
+
+	LDBG(curlun, "open backing file: %s curlun-ro[0x%08X]\n", filename, curlun->ro);
 	rc = 0;
 
 out:
@@ -3692,9 +4299,11 @@ out:
 static void close_backing_file(struct lun *curlun)
 {
 	if (curlun->filp) {
+		printk("close_backing_file\n");
 		LDBG(curlun, "close backing file\n");
 		fput(curlun->filp);
 		curlun->filp = NULL;
+		curlun->media_present = 0;
 	}
 }
 
@@ -3714,11 +4323,10 @@ static ssize_t show_ro(struct device *dev, struct device_attribute *attr, char *
 	return sprintf(buf, "%d\n", curlun->ro);
 }
 
-static ssize_t show_file(struct device *dev, struct device_attribute *attr,
-		char *buf)
+static ssize_t show_file(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct lun	*curlun = dev_to_lun(dev);
-	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+	struct fsg_dev	*fsg = (struct fsg_dev *) dev_get_drvdata(dev);
 	char		*p;
 	ssize_t		rc;
 
@@ -3742,13 +4350,13 @@ static ssize_t show_file(struct device *dev, struct device_attribute *attr,
 }
 
 
-static ssize_t store_ro(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t count)
+static ssize_t store_ro(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	ssize_t		rc = count;
 	struct lun	*curlun = dev_to_lun(dev);
-	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+	struct fsg_dev	*fsg = (struct fsg_dev *) dev_get_drvdata(dev);
 	int		i;
+    LDBG(curlun, " store_ro() ...\n");
 
 	if (sscanf(buf, "%d", &i) != 1)
 		return -EINVAL;
@@ -3767,12 +4375,13 @@ static ssize_t store_ro(struct device *dev, struct device_attribute *attr,
 	return rc;
 }
 
-static ssize_t store_file(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t count)
+static ssize_t store_file(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct lun	*curlun = dev_to_lun(dev);
-	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+	struct fsg_dev	*fsg = (struct fsg_dev *) dev_get_drvdata(dev);
 	int		rc = 0;
+
+    LDBG(curlun, "store_file() ...\n");
 
 	if (curlun->prevent_medium_removal && backing_file_is_open(curlun)) {
 		LDBG(curlun, "eject attempt prevented\n");
@@ -3819,12 +4428,12 @@ static void fsg_release(struct kref *ref)
 
 static void lun_release(struct device *dev)
 {
-	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+	struct fsg_dev	*fsg = (struct fsg_dev *) dev_get_drvdata(dev);
 
 	kref_put(&fsg->ref, fsg_release);
 }
 
-static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
+static void fsg_unbind(struct usb_gadget *gadget)
 {
 	struct fsg_dev		*fsg = get_gadget_data(gadget);
 	int			i;
@@ -3855,16 +4464,32 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 	}
 
 	/* Free the data buffers */
-	for (i = 0; i < NUM_BUFFERS; ++i)
-		kfree(fsg->buffhds[i].buf);
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->buffhds[i];
+
+		if ((bh->buf) && (i == 0))
+			usb_ep_free_buffer(fsg->bulk_in, bh->buf, bh->dma,
+					mod_data.buflen);
+
+		if ((bh->buf) && (i >= 1))
+			usb_ep_free_buffer(fsg->bulk_out, bh->buf, bh->dma,
+					mod_data.buflen);
+
+
+	}
 
 	/* Free the request and buffer for endpoint 0 */
 	if (req) {
-		kfree(req->buf);
+		if (req->buf)
+			usb_ep_free_buffer(fsg->ep0, req->buf,
+					req->dma, EP0_BUFSIZE);
 		usb_ep_free_request(fsg->ep0, req);
 	}
 
 	set_gadget_data(gadget, NULL);
+
+	switch_dev_unregister(&fsg->sdev);
+
 }
 
 
@@ -3879,25 +4504,28 @@ static int __init check_parameters(struct fsg_dev *fsg)
 	mod_data.protocol_type = USB_SC_SCSI;
 	mod_data.protocol_name = "Transparent SCSI";
 
-	/* Some peripheral controllers are known not to be able to
-	 * halt bulk endpoints correctly.  If one of them is present,
-	 * disable stalls.
-	 */
-	if (gadget_is_sh(fsg->gadget) || gadget_is_at91(fsg->gadget))
+	if (gadget_is_sh(fsg->gadget))
 		mod_data.can_stall = 0;
 
 	if (mod_data.release == 0xffff) {	// Parameter wasn't set
-		/* The sa1100 controller is not supported */
-		if (gadget_is_sa1100(fsg->gadget))
-			gcnum = -1;
-		else
-			gcnum = usb_gadget_controller_number(fsg->gadget);
-		if (gcnum >= 0)
-			mod_data.release = 0x0300 + gcnum;
-		else {
-			WARNING(fsg, "controller '%s' not recognized\n",
-				fsg->gadget->name);
-			mod_data.release = 0x0399;
+
+		if (gadget_is_wmt(fsg->gadget))	// gadget_chips.h
+			{
+			mod_data.release = 0x0001;	       // WMT Version A1
+		  printk("is WonderMedia Technology\n");
+		}else {
+    		if (gadget_is_sa1100(fsg->gadget))
+    			gcnum = -1;
+    		else
+    			gcnum = usb_gadget_controller_number(fsg->gadget);
+    		if (gcnum >= 0)
+    			mod_data.release = 0x0300 + gcnum;
+    		else {
+    			WARN(fsg, "controller '%s' not recognized\n",
+    				fsg->gadget->name);
+    			mod_data.release = 0x0399;
+    		}
+
 		}
 	}
 
@@ -3955,7 +4583,16 @@ static int __init check_parameters(struct fsg_dev *fsg)
 
 	return 0;
 }
+static ssize_t print_switch_name(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "%s\n", DRIVER_NAME);
+}
 
+static ssize_t print_switch_state(struct switch_dev *sdev, char *buf)
+{
+	struct fsg_dev	*fsg = container_of(sdev, struct fsg_dev, sdev);
+	return sprintf(buf, "%s\n", (fsg->config ? "online" : "offline"));
+}
 
 static int __init fsg_bind(struct usb_gadget *gadget)
 {
@@ -3967,29 +4604,34 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	struct usb_request	*req;
 	char			*pathbuf, *p;
 
+        printk("--- fsg_bind, mod_data.nluns = %d\n", mod_data.nluns);
 	fsg->gadget = gadget;
+
 	set_gadget_data(gadget, fsg);
 	fsg->ep0 = gadget->ep0;
 	fsg->ep0->driver_data = fsg;
-
+	fsg->sdev.name = DRIVER_NAME;
+	fsg->sdev.print_name = print_switch_name;
+	fsg->sdev.print_state = print_switch_state;
+	rc = switch_dev_register(&the_fsg->sdev);
+	if (rc < 0)
+		goto out;
 	if ((rc = check_parameters(fsg)) != 0)
 		goto out;
 
+
 	if (mod_data.removable) {	// Enable the store_xxx attributes
-		dev_attr_file.attr.mode = 0644;
+		dev_attr_ro.attr.mode = dev_attr_file.attr.mode = 0644;
+		dev_attr_ro.store = store_ro;
 		dev_attr_file.store = store_file;
-		if (!mod_data.cdrom) {
-			dev_attr_ro.attr.mode = 0644;
-			dev_attr_ro.store = store_ro;
-		}
 	}
 
 	/* Find out how many LUNs there should be */
 	i = mod_data.nluns;
 	if (i == 0)
-		i = max(mod_data.num_filenames, 1u);
+		i = max(mod_data.num_filenames, 1);
 	if (i > MAX_LUNS) {
-		ERROR(fsg, "invalid number of LUNs: %d\n", i);
+	ERROR(fsg, "invalid number of LUNs: %d\n", i);
 		rc = -EINVAL;
 		goto out;
 	}
@@ -3998,6 +4640,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	 * LUN devices in sysfs. */
 	fsg->luns = kzalloc(i * sizeof(struct lun), GFP_KERNEL);
 	if (!fsg->luns) {
+
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -4006,36 +4649,36 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	for (i = 0; i < fsg->nluns; ++i) {
 		curlun = &fsg->luns[i];
 		curlun->ro = mod_data.ro[i];
-		if (mod_data.cdrom)
-			curlun->ro = 1;
-		curlun->dev.release = lun_release;
 		curlun->dev.parent = &gadget->dev;
 		curlun->dev.driver = &fsg_driver.driver;
 		dev_set_drvdata(&curlun->dev, fsg);
-		dev_set_name(&curlun->dev,"%s-lun%d",
-			     dev_name(&gadget->dev), i);
+		snprintf(curlun->dev.bus_id, BUS_ID_SIZE,
+				"%s-lun%d", gadget->dev.bus_id, i);
 
-		if ((rc = device_register(&curlun->dev)) != 0) {
+		if ((rc = device_register(&curlun->dev)) != 0)
+			{
 			INFO(fsg, "failed to register LUN%d: %d\n", i, rc);
-			goto out;
 		}
-		if ((rc = device_create_file(&curlun->dev,
-					&dev_attr_ro)) != 0 ||
-				(rc = device_create_file(&curlun->dev,
-					&dev_attr_file)) != 0) {
-			device_unregister(&curlun->dev);
-			goto out;
+		else {
+			curlun->registered = 1;
+			curlun->dev.release = lun_release;
+			device_create_file(&curlun->dev, &dev_attr_ro);
+			device_create_file(&curlun->dev, &dev_attr_file);
+			kref_get(&fsg->ref);
 		}
-		curlun->registered = 1;
-		kref_get(&fsg->ref);
 
 		if (mod_data.file[i] && *mod_data.file[i]) {
-			if ((rc = open_backing_file(curlun,
-					mod_data.file[i])) != 0)
-				goto out;
+	        //GigaHsu 2008-1-23 Don't open at first or cause SD card Plug&Play problem.
+			//if ((rc = open_backing_file(curlun, file[i])) != 0)
+			//{
+			//    if (!mod_data.removable)
+		    // 	      goto out;
+			//}
+
 		} else if (!mod_data.removable) {
 			ERROR(fsg, "no file given for LUN%d\n", i);
 			rc = -EINVAL;
+
 			goto out;
 		}
 	}
@@ -4074,31 +4717,32 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	intf_desc.bInterfaceProtocol = mod_data.transport_type;
 	fs_function[i + FS_FUNCTION_PRE_EP_ENTRIES] = NULL;
 
-	if (gadget_is_dualspeed(gadget)) {
-		hs_function[i + HS_FUNCTION_PRE_EP_ENTRIES] = NULL;
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+	hs_function[i + HS_FUNCTION_PRE_EP_ENTRIES] = NULL;
 
-		/* Assume ep0 uses the same maxpacket value for both speeds */
-		dev_qualifier.bMaxPacketSize0 = fsg->ep0->maxpacket;
+	/* Assume ep0 uses the same maxpacket value for both speeds */
+	dev_qualifier.bMaxPacketSize0 = fsg->ep0->maxpacket;
 
-		/* Assume endpoint addresses are the same for both speeds */
-		hs_bulk_in_desc.bEndpointAddress =
-				fs_bulk_in_desc.bEndpointAddress;
-		hs_bulk_out_desc.bEndpointAddress =
-				fs_bulk_out_desc.bEndpointAddress;
-		hs_intr_in_desc.bEndpointAddress =
-				fs_intr_in_desc.bEndpointAddress;
+	/* Assume that all endpoint addresses are the same for both speeds */
+	hs_bulk_in_desc.bEndpointAddress = fs_bulk_in_desc.bEndpointAddress;
+	hs_bulk_out_desc.bEndpointAddress = fs_bulk_out_desc.bEndpointAddress;
+	hs_intr_in_desc.bEndpointAddress = fs_intr_in_desc.bEndpointAddress;
+#endif
+
+	if (gadget->is_otg) {
+		otg_desc.bmAttributes |= USB_OTG_HNP,
+		config_desc.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
 	}
-
-	if (gadget_is_otg(gadget))
-		otg_desc.bmAttributes |= USB_OTG_HNP;
 
 	rc = -ENOMEM;
 
 	/* Allocate the request and buffer for endpoint 0 */
-	fsg->ep0req = req = usb_ep_alloc_request(fsg->ep0, GFP_KERNEL);
+	fsg->ep0req = req = usb_ep_alloc_request(fsg->ep0, GFP_KERNEL|GFP_ATOMIC);
 	if (!req)
 		goto out;
-	req->buf = kmalloc(EP0_BUFSIZE, GFP_KERNEL);
+	req->buf = usb_ep_alloc_buffer(fsg->ep0, EP0_BUFSIZE,
+			&req->dma, GFP_KERNEL|GFP_ATOMIC);
+
 	if (!req->buf)
 		goto out;
 	req->complete = ep0_complete;
@@ -4107,12 +4751,20 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	for (i = 0; i < NUM_BUFFERS; ++i) {
 		struct fsg_buffhd	*bh = &fsg->buffhds[i];
 
-		/* Allocate for the bulk-in endpoint.  We assume that
-		 * the buffer will also work with the bulk-out (and
-		 * interrupt-in) endpoint. */
-		bh->buf = kmalloc(mod_data.buflen, GFP_KERNEL);
+        if(i == 0)
+		bh->buf = usb_ep_alloc_buffer(fsg->bulk_in, mod_data.buflen,
+				&bh->dma, GFP_KERNEL|GFP_ATOMIC);
+
+		if(i >= 1)
+		bh->buf = usb_ep_alloc_buffer(fsg->bulk_out, mod_data.buflen,
+				&bh->dma, GFP_KERNEL|GFP_ATOMIC);
+
 		if (!bh->buf)
 			goto out;
+
+		//Giga Hsu 2007.5.8 Add for initial
+		bh->inreq_busy = 0;
+		bh->outreq_busy = 0;
 		bh->next = bh + 1;
 	}
 	fsg->buffhds[NUM_BUFFERS - 1].next = &fsg->buffhds[0];
@@ -4120,12 +4772,18 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	/* This should reflect the actual gadget power source */
 	usb_gadget_set_selfpowered(gadget);
 
-	snprintf(manufacturer, sizeof manufacturer, "%s %s with %s",
-			init_utsname()->sysname, init_utsname()->release,
+  //Marked by GigaHsu : 2007.6.5
+	/*
+	    snprintf(manufacturer, sizeof manufacturer,
+			UTS_SYSNAME " " UTS_RELEASE " with %s",
 			gadget->name);
+  */
 
 	/* On a real device, serial[] would be loaded from permanent
 	 * storage.  We just encode it from the driver version string. */
+
+	//Marked by GigaHsu : 2007.6.5
+	/*
 	for (i = 0; i < sizeof(serial) - 2; i += 2) {
 		unsigned char		c = DRIVER_VERSION[i / 2];
 
@@ -4133,11 +4791,12 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			break;
 		sprintf(&serial[i], "%02X", c);
 	}
-
+  */
 	fsg->thread_task = kthread_create(fsg_main_thread, fsg,
 			"file-storage-gadget");
 	if (IS_ERR(fsg->thread_task)) {
 		rc = PTR_ERR(fsg->thread_task);
+
 		goto out;
 	}
 
@@ -4158,6 +4817,8 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			LINFO(curlun, "ro=%d, file: %s\n",
 					curlun->ro, (p ? p : "(error)"));
 		}
+
+
 	}
 	kfree(pathbuf);
 
@@ -4167,15 +4828,34 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			mod_data.protocol_name, mod_data.protocol_type);
 	DBG(fsg, "VendorID=x%04x, ProductID=x%04x, Release=x%04x\n",
 			mod_data.vendor, mod_data.product, mod_data.release);
-	DBG(fsg, "removable=%d, stall=%d, cdrom=%d, buflen=%u\n",
+	DBG(fsg, "removable=%d, stall=%d, buflen=%u\n",
 			mod_data.removable, mod_data.can_stall,
-			mod_data.cdrom, mod_data.buflen);
-	DBG(fsg, "I/O thread pid: %d\n", task_pid_nr(fsg->thread_task));
+			mod_data.buflen);
 
 	set_bit(REGISTERED, &fsg->atomic_bitflags);
-
 	/* Tell the thread to start working */
-	wake_up_process(fsg->thread_task);
+    wake_up_process(fsg->thread_task);
+#ifdef SQUELCH_DETECTOR
+	INFO(fsg, "squelch=%04X\n", mod_data.squelch_detector);
+	{//GigaHsu : 2008.1.29 for System Teams Test VT8500 Squelch Detector Fine Tune
+
+	  unsigned char* pEHCIPHYControl;
+	  unsigned char temp8;
+
+	  pEHCIPHYControl = (unsigned char*)(0xD8007800 + 0x4C);
+
+      INFO(fsg, "Before PHY Control Register(Squelch)= %02X\n", *pEHCIPHYControl);
+
+      temp8 = (*pEHCIPHYControl  & 0xFC);
+	  temp8 |= ((unsigned char)mod_data.squelch_detector & 0x03);
+
+	  *pEHCIPHYControl = temp8;//USB in normal operation
+
+	  INFO(fsg, "After PHY Control Register(Squelch)= %02X\n", *pEHCIPHYControl);
+	}
+#endif
+
+	DBG(fsg, "I/O thread pid: %d\n", fsg->thread_pid);
 	return 0;
 
 autoconf_fail:
@@ -4186,7 +4866,6 @@ out:
 	fsg->state = FSG_STATE_TERMINATED;	// The thread is dead
 	fsg_unbind(gadget);
 	close_all_backing_files(fsg);
-	complete(&fsg->thread_notifier);
 	return rc;
 }
 
@@ -4198,6 +4877,7 @@ static void fsg_suspend(struct usb_gadget *gadget)
 	struct fsg_dev		*fsg = get_gadget_data(gadget);
 
 	DBG(fsg, "suspend\n");
+	printk("fsg_suspend\n");
 	set_bit(SUSPENDED, &fsg->atomic_bitflags);
 }
 
@@ -4206,6 +4886,7 @@ static void fsg_resume(struct usb_gadget *gadget)
 	struct fsg_dev		*fsg = get_gadget_data(gadget);
 
 	DBG(fsg, "resume\n");
+	printk("fsg_resume\n");
 	clear_bit(SUSPENDED, &fsg->atomic_bitflags);
 }
 
@@ -4220,12 +4901,11 @@ static struct usb_gadget_driver		fsg_driver = {
 #endif
 	.function	= (char *) longname,
 	.bind		= fsg_bind,
-	.unbind		= fsg_unbind,
+	.unbind		= __exit_p(fsg_unbind),
 	.disconnect	= fsg_disconnect,
 	.setup		= fsg_setup,
 	.suspend	= fsg_suspend,
 	.resume		= fsg_resume,
-
 	.driver		= {
 		.name		= (char *) shortname,
 		.owner		= THIS_MODULE,
@@ -4253,16 +4933,43 @@ static int __init fsg_alloc(void)
 }
 
 
+
+
 static int __init fsg_init(void)
 {
 	int		rc;
 	struct fsg_dev	*fsg;
 
 	if ((rc = fsg_alloc()) != 0)
-		return rc;
+		   return rc;
 	fsg = the_fsg;
-	if ((rc = usb_gadget_register_driver(&fsg_driver)) != 0)
+	if ((rc = usb_gadget_register_driver(&fsg_driver)) != 0) {
+
 		kref_put(&fsg->ref, fsg_release);
+ 	    /*
+		{
+		    u32 *tmp;
+		    // enable GPIO output
+            tmp = (u32 *) 0xD8110044;
+           *tmp |= 0x00000400;
+            DBG(fsg, "Enable GPIO 0xD8110044[0x%08X]\n",*tmp);
+            tmp = (u32 *) 0xD8110004;
+           *tmp |= 0x00000400;
+            DBG(fsg, "Enable GPIO 0xD8110004[0x%08X]\n",*tmp);
+            tmp = (u32 *) 0xD8110024;
+           *tmp |= 0x00000400;
+            DBG(fsg, "Enable GPIO 0xD8110024[0x%08X]\n",*tmp);
+
+            DBG(fsg, "Enable GPIO output OK! \n");
+
+            //OTG Internal Debug Out Selection.
+            tmp = (u32 *) (0xD80E6400 + 0x1F*4);
+            *tmp = 0x00000005;
+
+            DBG(fsg, "[OTG IP Monito] Rx1F[0x%08X]\n", *tmp);
+	  }
+	  */
+    }
 	return rc;
 }
 module_init(fsg_init);

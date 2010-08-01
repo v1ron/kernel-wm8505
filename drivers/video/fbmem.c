@@ -458,10 +458,14 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 		fb_set_logo(info, logo, logo_new, fb_logo.depth);
 	}
 
-	image.dx = 0;
+/*	image.dx = 0;
 	image.dy = y;
 	image.width = logo->width;
-	image.height = logo->height;
+	image.height = logo->height;*/
+	image.dx = (info->var.xres - fb_logo.logo->width)/2;
+	image.dy = (info->var.yres - fb_logo.logo->height)/2;
+	image.width = fb_logo.logo->width;
+	image.height = fb_logo.logo->height;
 
 	if (rotate) {
 		logo_rotate = kmalloc(logo->width *

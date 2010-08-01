@@ -32,6 +32,13 @@ config SERIO_I8042
 	  To compile this driver as a module, choose M here: the
 	  module will be called i8042.
 
+config SERIO_I8042_WM8510
+    tristate "VT8500 Keyboards/mise controller"
+    default y
+    depends on SERIO
+    ---help---
+      If you use WMT i8042 keyboard/mise controller, say Y here.
+
 config SERIO_SERPORT
 	tristate "Serial port line discipline"
 	default y

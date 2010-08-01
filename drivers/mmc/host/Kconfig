@@ -212,3 +212,12 @@ config MMC_TMIO
 	help
 	  This provides support for the SD/MMC cell found in TC6393XB,
 	  T7L66XB and also ipaq ASIC3
+
+config MMC_ATSMB
+	tristate "VIA ATSMB(AHB To MMC/SD BUS)"
+	help
+	  This selects the WMT Secure digital and Multimedia card Interface.
+	  If you have a machine with VIA ATSMB, say Y or M here.
+
+	  If unsure, say N.	  
+

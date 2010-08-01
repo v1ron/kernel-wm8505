@@ -33,7 +33,8 @@
  * It keeps track of every ITD (or SITD) that's linked, and holds enough
  * pre-calculated schedule data to make appending to the queue be quick.
  */
-
+ //kevin fix for usb bluetooth conflict with usb keyboard
+#define CONFIG_USB_EHCI_TT_NEWSCHED
 static int ehci_get_frame (struct usb_hcd *hcd);
 
 /*-------------------------------------------------------------------------*/

@@ -773,6 +773,7 @@ static int uhci_pci_suspend(struct usb_hcd *hcd, pm_message_t message)
 {
 	struct uhci_hcd *uhci = hcd_to_uhci(hcd);
 	int rc = 0;
+	u16 pmc_enable = 0;
 
 	dev_dbg(uhci_dev(uhci), "%s\n", __func__);
 
@@ -799,6 +800,12 @@ static int uhci_pci_suspend(struct usb_hcd *hcd, pm_message_t message)
 	if (message.event == PM_EVENT_PRETHAW)
 		uhci_hc_died(uhci);
 
+	/*push UHCI to D3 mode & enable PME to wake up system (NeilChen090331)*/
+	pci_read_config_word(to_pci_dev(uhci_dev(uhci)), 0x84, &pmc_enable);
+	pmc_enable |= 0x103;
+	pci_write_config_word(to_pci_dev(uhci_dev(uhci)), 0x84, pmc_enable);
+	/*push UHCI to D3 mode & enable PME to wake up system (NeilChen090331)*/
+			
 done_okay:
 	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
 done:
@@ -809,6 +816,14 @@ done:
 static int uhci_pci_resume(struct usb_hcd *hcd)
 {
 	struct uhci_hcd *uhci = hcd_to_uhci(hcd);
+	u16 pmc_enable = 0;
+
+	/*push UHCI to D0 mode & disable PME to wake up system (NeilChen090331)*/
+	pci_read_config_word(to_pci_dev(uhci_dev(uhci)), 0x84, &pmc_enable);
+	pmc_enable &= ~0x03;
+	pci_write_config_word(to_pci_dev(uhci_dev(uhci)), 0x84, pmc_enable);
+	/*push UHCI to D0 mode & disable PME to wake up system (NeilChen090331)*/
+
 
 	dev_dbg(uhci_dev(uhci), "%s\n", __func__);
 

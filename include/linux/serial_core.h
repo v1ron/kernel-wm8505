@@ -323,6 +323,7 @@ struct uart_port {
 	unsigned char		suspended;
 	unsigned char		unused[2];
 	void			*private_data;		/* generic platform data pointer */
+	unsigned int old_urier;
 };
 
 /*

@@ -30,12 +30,16 @@ int mmc_send_io_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 
 	cmd.opcode = SD_IO_SEND_OP_COND;
 	cmd.arg = ocr;
-	cmd.flags = MMC_RSP_SPI_R4 | MMC_RSP_R4 | MMC_CMD_BCR;
+	//cmd.flags = MMC_RSP_SPI_R4 | MMC_RSP_R4 | MMC_CMD_BCR;
+    cmd.flags = MMC_RSP_R4 | MMC_CMD_BCR;
 
 	for (i = 100; i; i--) {
+        printk("=========== i = %d ===========\n", i);
 		err = mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
-		if (err)
-			break;
+		if (err) {
+            printk("mmc_wait_for_cmd err break, err = %d, i = %d \n", err, i);
+            break;
+        }
 
 		/* if we're just probing, do a single pass */
 		if (ocr == 0)
@@ -52,8 +56,10 @@ int mmc_send_io_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 			if (cmd.resp[1] & MMC_CARD_BUSY)
 				break;
 		} else {
-			if (cmd.resp[0] & MMC_CARD_BUSY)
+			if (cmd.resp[0] & MMC_CARD_BUSY) {
+                printk("card is not busy!\n");
 				break;
+            }
 		}
 
 		err = -ETIMEDOUT;

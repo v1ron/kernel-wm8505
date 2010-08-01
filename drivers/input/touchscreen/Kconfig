@@ -293,6 +293,17 @@ config TOUCHSCREEN_WM9712
 	help
 	  Say Y here to enable support for the Wolfson Microelectronics
 	  WM9712 touchscreen controller.
+	  
+config TOUCHSCREEN_BATT_WM9715
+	tristate "WM9715 Android Touchscreen and battery interface support"
+	default y
+	help
+	  Say Y here to enable support for the Wolfson Microelectronics
+	  WM9715 touchscreen controller.
+	  
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here.
 
 config TOUCHSCREEN_WM9713
 	bool "WM9713 Touchscreen interface support"

@@ -2237,10 +2237,12 @@ static int fbcon_switch(struct vc_data *vc)
 		logo_shown = fg_console;
 		/* This is protected above by initmem_freed */
 		fb_show_logo(info, ops->rotate);
+#if 0		
 		update_region(vc,
 			      vc->vc_origin + vc->vc_size_row * vc->vc_top,
 			      vc->vc_size_row * (vc->vc_bottom -
 						 vc->vc_top) / 2);
+#endif						 
 		return 0;
 	}
 	return 1;

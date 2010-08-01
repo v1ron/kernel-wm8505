@@ -1,9 +1,11 @@
 /*
  *  linux/include/linux/mtd/nand.h
  *
- *  Copyright (c) 2000 David Woodhouse <dwmw2@infradead.org>
+ *  Copyright (c) 2000 David Woodhouse <dwmw2@mvhi.com>
  *                     Steven J. Hill <sjhill@realitydiluted.com>
  *		       Thomas Gleixner <tglx@linutronix.de>
+ *
+ * $Id: nand.h,v 1.74 2005/09/15 13:58:50 vwool Exp $
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -43,8 +45,11 @@ extern void nand_wait_ready(struct mtd_info *mtd);
  * is supported now. If you add a chip with bigger oobsize/page
  * adjust this accordingly.
  */
-#define NAND_MAX_OOBSIZE	64
-#define NAND_MAX_PAGESIZE	2048
+/* edward wan modify for supporting 4096 page sise */ 
+#define NAND_MAX_OOBSIZE	128
+#define NAND_MAX_PAGESIZE	4096
+//#define NAND_MAX_OOBSIZE	64
+//#define NAND_MAX_PAGESIZE	2048
 
 /*
  * Constants for hardware specific CLE/ALE/NCE function
@@ -177,9 +182,6 @@ typedef enum {
 #define NAND_MUST_PAD(chip) (!(chip->options & NAND_NO_PADDING))
 #define NAND_HAS_CACHEPROG(chip) ((chip->options & NAND_CACHEPRG))
 #define NAND_HAS_COPYBACK(chip) ((chip->options & NAND_COPYBACK))
-/* Large page NAND with SOFT_ECC should support subpage reads */
-#define NAND_SUBPAGE_READ(chip) ((chip->ecc.mode == NAND_ECC_SOFT) \
-					&& (chip->page_shift > 9))
 
 /* Mask to zero out the chip options, which come from the id table */
 #define NAND_CHIPOPTIONS_MSK	(0x0000ffff & ~NAND_NO_AUTOINCR)
@@ -248,7 +250,6 @@ struct nand_hw_control {
  * @read_page_raw:	function to read a raw page without ECC
  * @write_page_raw:	function to write a raw page without ECC
  * @read_page:	function to read a page according to the ecc generator requirements
- * @read_subpage:	function to read parts of the page covered by ECC.
  * @write_page:	function to write a page according to the ecc generator requirements
  * @read_oob:	function to read chip OOB data
  * @write_oob:	function to write chip OOB data
@@ -278,10 +279,6 @@ struct nand_ecc_ctrl {
 	int			(*read_page)(struct mtd_info *mtd,
 					     struct nand_chip *chip,
 					     uint8_t *buf);
-	int			(*read_subpage)(struct mtd_info *mtd,
-					     struct nand_chip *chip,
-					     uint32_t offs, uint32_t len,
-					     uint8_t *buf);
 	void			(*write_page)(struct mtd_info *mtd,
 					      struct nand_chip *chip,
 					      const uint8_t *buf);
@@ -292,6 +289,11 @@ struct nand_ecc_ctrl {
 	int			(*write_oob)(struct mtd_info *mtd,
 					     struct nand_chip *chip,
 					     int page);
+        int			(*read_bb_oob)(struct mtd_info *mtd,
+					    struct nand_chip *chip,
+					    int page,
+					    int sndcmd);
+
 };
 
 /**
@@ -335,12 +337,17 @@ struct nand_buffers {
  * @erase_cmd:		[INTERN] erase command write function, selectable due to AND support
  * @scan_bbt:		[REPLACEABLE] function to scan bad block table
  * @chip_delay:		[BOARDSPECIFIC] chip dependent delay for transfering data from array to read regs (tR)
+ * @wq:			[INTERN] wait queue to sleep on if a NAND operation is in progress
  * @state:		[INTERN] the current state of the NAND device
  * @oob_poi:		poison value buffer
  * @page_shift:		[INTERN] number of address bits in a page (column address bits)
  * @phys_erase_shift:	[INTERN] number of address bits in a physical eraseblock
  * @bbt_erase_shift:	[INTERN] number of address bits in a bbt entry
  * @chip_shift:		[INTERN] number of address bits in one chip
+ * @datbuf:		[INTERN] internal buffer for one page + oob
+ * @oobbuf:		[INTERN] oob buffer for one eraseblock
+ * @oobdirty:		[INTERN] indicates that oob_buf must be reinitialized
+ * @data_poi:		[INTERN] pointer to a data buffer
  * @options:		[BOARDSPECIFIC] various chip options. They can partly be set to inform nand_scan about
  *			special functionality. See the defines for further explanation
  * @badblockpos:	[INTERN] position of the bad block marker in the oob area
@@ -394,7 +401,7 @@ struct nand_chip {
 	int		bbt_erase_shift;
 	int		chip_shift;
 	int		numchips;
-	uint64_t	chipsize;
+	unsigned long	chipsize;
 	int		pagemask;
 	int		pagebuf;
 	int		subpagesize;
@@ -433,7 +440,6 @@ struct nand_chip {
 #define NAND_MFR_STMICRO	0x20
 #define NAND_MFR_HYNIX		0xad
 #define NAND_MFR_MICRON		0x2c
-#define NAND_MFR_AMD		0x01
 
 /**
  * struct nand_flash_dev - NAND Flash Device ID Structure
@@ -455,7 +461,31 @@ struct nand_flash_dev {
 	unsigned long erasesize;
 	unsigned long options;
 };
-
+/* DannierChen-2009-10-07 add for new nand flash support list */
+#ifndef DWORD
+#define DWORD	unsigned int
+#endif
+#define MAX_PRODUCT_NAME_LENGTH 0x20
+struct WMT_nand_flash_dev {
+ DWORD dwFlashID;            //composed by 4 bytes of ID. For example:0xADF1801D
+ DWORD dwBlockCount;      //block count of one chip. For example: 1024
+ DWORD dwPageSize;       //page size. For example:2048(other value can be 512 or 4096)
+ DWORD dwSpareSize;       //spare area size. For example:16(almost all kinds of nand is 16)
+ DWORD dwBlockSize;       //block size = dwPageSize * PageCntPerBlock. For example:131072
+ DWORD dwAddressCycle;      //address cycle 4 or 5
+ DWORD dwBI0Position;      //BI0 page postion in block
+ DWORD dwBI1Position;      //BI1 page postion in block
+ DWORD dwBIOffset;       //BI offset in page
+ DWORD dwDataWidth;      //data with X8 or X16
+ DWORD dwPageProgramLimit;     //chip can program PAGE_PROGRAM_LIMIT times within the same page
+ DWORD dwSeqRowReadSupport;    //whether support sequential row read, 1 = support 0 = not support
+ DWORD dwSeqPageProgram;     //chip need sequential page program in a block. 1 = need
+ DWORD dwNandType;       //MLC or SLC
+ DWORD dwECCBitNum;      //ECC bit number needed
+ DWORD dwRWTimming;     //NFC Read Pulse width and Read hold time, write so does. default =0x12101210
+ char ProductName[MAX_PRODUCT_NAME_LENGTH]; //product name. for example "HYNIX_NF_HY27UF081G2A"
+ unsigned long options;
+};
 /**
  * struct nand_manufacturers - NAND Flash Manufacturer ID Structure
  * @name:	Manufacturer name
@@ -466,8 +496,15 @@ struct nand_manufacturers {
 	char * name;
 };
 
+extern struct WMT_nand_flash_dev WMT_nand_flash_ids[];
 extern struct nand_flash_dev nand_flash_ids[];
 extern struct nand_manufacturers nand_manuf_ids[];
+/* edwardwan add 20080605  */
+#ifdef CONFIG_MTD_PARTITIONS
+#include <linux/mtd/partitions.h>
+extern struct mtd_partition nand_partitions[];
+#endif
+
 
 /**
  * struct nand_bbt_descr - bad block table descriptor
@@ -502,6 +539,7 @@ struct nand_bbt_descr {
 	int	maxblocks;
 	int	reserved_block_code;
 	uint8_t	*pattern;
+	int	wince_tlb_flag;
 };
 
 /* Options for the bad block table descriptors */

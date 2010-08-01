@@ -357,8 +357,9 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	 * block-addressed SDHC cards.
 	 */
 	err = mmc_send_if_cond(host, ocr);
-	if (!err)
+	if (!err) {
 		ocr |= 1 << 30;
+    }
 
 	err = mmc_send_app_op_cond(host, ocr, NULL);
 	if (err)

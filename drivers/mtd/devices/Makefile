@@ -16,3 +16,5 @@ obj-$(CONFIG_MTD_LART)		+= lart.o
 obj-$(CONFIG_MTD_BLOCK2MTD)	+= block2mtd.o
 obj-$(CONFIG_MTD_DATAFLASH)	+= mtd_dataflash.o
 obj-$(CONFIG_MTD_M25P80)	+= m25p80.o
+obj-$(CONFIG_MTD_VT8500_SF) 	+= wmt_sf_ids.o wmt_sf.o
+#obj-$(CONFIG_MTD_VT8500_NOR)	+= wmt_nor.o

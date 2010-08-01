@@ -582,10 +582,51 @@ struct option_port_private {
 	unsigned long tx_start_time[N_OUT_URB];
 };
 
+
+/*
+define gpio for wifi power ctrl   kevin 2010.03.02
+*/
+#define WM8505
+#ifdef WM8505
+#include <mach/gpio_if.h>
+extern int wmt_getsyspara(char *varname, unsigned char *varval, int varlen);
+extern int wmt_setsyspara(char *varname, char *varval);
+
+void _3g_power_ctrl(int open)
+{
+    int retval;
+    char buf[200]={0};
+
+    if(open)
+    {
+        retval = wmt_getsyspara("3g_powerup", buf, 200);
+        if(!retval)
+		{
+		    printk("3g power up:%s\n", buf);
+	            excute_gpio_op(buf);
+		}
+
+    }
+    else
+    {
+        retval = wmt_getsyspara("3g_powerdown", buf, 200);
+		if(!retval)
+		{
+		    printk("3g power down:%s\n", buf);
+	            excute_gpio_op(buf);
+		}
+
+    }
+}
+#endif
+
+
+
 /* Functions used by new usb-serial code. */
 static int __init option_init(void)
 {
 	int retval;
+	_3g_power_ctrl(1);
 	retval = usb_serial_register(&option_1port_device);
 	if (retval)
 		goto failed_1port_device_register;
@@ -601,6 +642,7 @@ static int __init option_init(void)
 failed_driver_register:
 	usb_serial_deregister(&option_1port_device);
 failed_1port_device_register:
+	_3g_power_ctrl(0);
 	return retval;
 }
 
@@ -608,6 +650,7 @@ static void __exit option_exit(void)
 {
 	usb_deregister(&option_driver);
 	usb_serial_deregister(&option_1port_device);
+	_3g_power_ctrl(0);
 }
 
 module_init(option_init);

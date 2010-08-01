@@ -273,6 +273,7 @@ static int ehci_pci_suspend(struct usb_hcd *hcd, pm_message_t message)
 	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
 	unsigned long		flags;
 	int			rc = 0;
+	u16 pmc_enable = 0;
 
 	if (time_before(jiffies, ehci->next_statechange))
 		msleep(10);
@@ -306,6 +307,12 @@ static int ehci_pci_suspend(struct usb_hcd *hcd, pm_message_t message)
 	// could save FLADJ in case of Vaux power loss
 	// ... we'd only use it to handle clock skew
 
+	/*push UHCI to D3 mode & enable PME to wake up system (NeilChen090331)*/
+	pci_read_config_word(to_pci_dev(hcd->self.controller), 0x84, &pmc_enable);
+	pmc_enable |= 0x103;
+	pci_write_config_word(to_pci_dev(hcd->self.controller), 0x84, pmc_enable);
+	/*push UHCI to D3 mode & enable PME to wake up system (NeilChen090331)*/
+
 	return rc;
 }
 
@@ -313,6 +320,14 @@ static int ehci_pci_resume(struct usb_hcd *hcd)
 {
 	struct ehci_hcd		*ehci = hcd_to_ehci(hcd);
 	struct pci_dev		*pdev = to_pci_dev(hcd->self.controller);
+	u16 pmc_enable = 0;
+
+	/*push UHCI to D0 mode & disable PME to wake up system (NeilChen090331)*/
+	pci_read_config_word(pdev, 0x84, &pmc_enable);
+	pmc_enable &= ~0x03;
+	pci_write_config_word(pdev, 0x84, pmc_enable);
+	/*push UHCI to D0 mode & disable PME to wake up system (NeilChen090331)*/
+
 
 	// maybe restore FLADJ
 

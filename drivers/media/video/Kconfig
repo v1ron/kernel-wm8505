@@ -702,6 +702,12 @@ config VIDEO_M32R_AR_M64278
 	  To compile this driver as a module, choose M here: the
 	  module will be called arv.
 
+config VIDEO_CMOSCAM
+	tristate "WonderMedia CMOS camera support"
+	depends on VIDEO_V4L2
+	help
+	  WonderMedia CMOS Camera is a driver wrapper for V4L2.
+
 config VIDEO_CAFE_CCIC
 	tristate "Marvell 88ALP01 (Cafe) CMOS Camera Controller support"
 	depends on PCI && I2C && VIDEO_V4L2

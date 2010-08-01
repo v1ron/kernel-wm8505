@@ -118,6 +118,26 @@ choice
 	   Many controller drivers are platform-specific; these
 	   often need board-specific hooks.
 
+config USB_GADGET_WMT
+	boolean "WMT"
+	select USB_GADGET_DUALSPEED
+	help
+	   VIA's WMT processors integrate an USB peripheral controller
+	   which supports both full and high speed USB 2.0 data transfers.  
+	   
+	   It has four endpoints, as well as endpoint zero (for control 
+	   transfers), an interrupt endpoints, and two bulk endpoints.
+
+	   Say "y" to link the driver statically, or "m" to build a
+	   dynamically linked module called "WMT_udc" and force all
+	   gadget drivers to also be dynamically linked.
+
+config USB_WMT
+	tristate
+	depends on USB_GADGET_WMT
+	default USB_GADGET
+	select USB_GADGET_SELECTED
+
 #
 # Integrated controllers
 #

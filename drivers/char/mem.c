@@ -113,6 +113,22 @@ void __attribute__((weak)) unxlate_dev_mem_ptr(unsigned long phys, void *addr)
 {
 }
 
+#define REG32               *(volatile unsigned int *)
+#define REG16               *(volatile unsigned short *)
+#define REG8                *(volatile unsigned char *)
+
+#define REG_GET32(addr)		( REG32(addr) )		/* Read 32 bits Register */
+#define REG_GET16(addr)		( REG16(addr) )		/* Read 16 bits Register */
+#define REG_GET8(addr)		( REG8(addr) )		/* Read  8 bits Register */
+
+#define REG_SET32(addr,val)	( REG32(addr) = (val) )	/* Write 32 bits Register */
+#define REG_SET16(addr,val)	( REG16(addr) = (val) )	/* Write 16 bits Register */
+#define REG_SET8(addr,val)	( REG8(addr)  = (val) )	/* Write  8 bits Register */
+
+#define MEM_GET32(addr)		( REG32(addr) )		/* Read  32 bits Memory */
+#define MEM_SET32(addr,val)	( REG32(addr) = (val) )	/* Write 32 bits Memory */
+
+
 /*
  * This funcion reads the *physical* memory. The f_pos points directly to the 
  * memory location. 
@@ -120,6 +136,8 @@ void __attribute__((weak)) unxlate_dev_mem_ptr(unsigned long phys, void *addr)
 static ssize_t read_mem(struct file * file, char __user * buf,
 			size_t count, loff_t *ppos)
 {
+	capable(CAP_SYS_RAWIO) ? 0 : -EPERM;	// __modify__
+	
 	unsigned long p = *ppos;
 	ssize_t read, sz;
 	char *ptr;
@@ -187,6 +205,7 @@ static ssize_t read_mem(struct file * file, char __user * buf,
 static ssize_t write_mem(struct file * file, const char __user * buf, 
 			 size_t count, loff_t *ppos)
 {
+	capable(CAP_SYS_RAWIO) ? 0 : -EPERM;	//__modify__
 	unsigned long p = *ppos;
 	ssize_t written, sz;
 	unsigned long copied;
@@ -343,18 +362,22 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
 	size_t size = vma->vm_end - vma->vm_start;
 
-	if (!valid_mmap_phys_addr_range(vma->vm_pgoff, size))
+	if (!valid_mmap_phys_addr_range(vma->vm_pgoff, size)){
 		return -EINVAL;
-
-	if (!private_mapping_ok(vma))
+	}
+	
+	if (!private_mapping_ok(vma)){
 		return -ENOSYS;
-
-	if (!range_is_allowed(vma->vm_pgoff, size))
+	}
+	
+	if (!range_is_allowed(vma->vm_pgoff, size)){
 		return -EPERM;
-
+	}
+	
 	if (!phys_mem_access_prot_allowed(file, vma->vm_pgoff, size,
-						&vma->vm_page_prot))
+						&vma->vm_page_prot)){
 		return -EINVAL;
+	}
 
 	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
 						 size,
@@ -800,9 +823,12 @@ static loff_t memory_lseek(struct file * file, loff_t offset, int orig)
 #if defined(CONFIG_DEVMEM) || defined(CONFIG_DEVKMEM) || defined(CONFIG_DEVPORT)
 static int open_port(struct inode * inode, struct file * filp)
 {
-	return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;
+	//return capable(CAP_SYS_RAWIO) ? 0 : -EPERM;	// __modify__
+	
+	return 0;
 }
 #endif
+
 
 #define zero_lseek	null_lseek
 #define full_lseek      null_lseek

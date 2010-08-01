@@ -83,8 +83,9 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	spin_lock_init(&host->lock);
 	init_waitqueue_head(&host->wq);
 	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
+	//INIT_WORK(&host->detect, mmc_rescan);
 
-	/*
+    /*
 	 * By default, hosts do not support SGIO or large requests.
 	 * They have to set these according to their abilities.
 	 */
@@ -123,8 +124,10 @@ int mmc_add_host(struct mmc_host *host)
 	led_trigger_register_simple(dev_name(&host->class_dev), &host->led);
 
 	err = device_add(&host->class_dev);
-	if (err)
+	if (err) {
+        printk("device_add error\n");
 		return err;
+    }
 
 #ifdef CONFIG_DEBUG_FS
 	mmc_add_host_debugfs(host);

@@ -30,7 +30,7 @@ if SOUND
 
 config SOUND_OSS_CORE
 	bool
-	default n
+	default y
 
 source "sound/oss/dmasound/Kconfig"
 

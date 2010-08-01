@@ -37,5 +37,13 @@ extern void __memzero(void *ptr, __kernel_size_t n);
 		}							\
 		(__p);							\
 	})
-
+#define memzero(p,n) 							\
+	({ 								\
+	 	void *__p = (p); size_t __n = n;			\
+	 	if ((__n) != 0) 					\
+	 		__memzero((__p),(__n)); 			\
+	 	(__p); 							\
+	 })
 #endif
+
+

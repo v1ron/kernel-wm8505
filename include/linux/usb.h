@@ -1145,6 +1145,11 @@ extern int usb_disabled(void);
 #define URB_DIR_OUT		0
 #define URB_DIR_MASK		URB_DIR_IN
 
+
+/*{CharlesTu, 2008.12.26,  for test mode */
+#define URB_HCD_DRIVER_TEST     0xFFFF  /* Do NOT hand back or free this URB */
+/*CharlesTu}*/
+
 struct usb_iso_packet_descriptor {
 	unsigned int offset;
 	unsigned int length;		/* expected length */

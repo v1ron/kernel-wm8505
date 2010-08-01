@@ -131,7 +131,7 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 			*(u32 *)loc &= 0xff000000;
 			*(u32 *)loc |= offset & 0x00ffffff;
 			break;
-
+/*
 		case R_ARM_MOVW_ABS_NC:
 		case R_ARM_MOVT_ABS:
 			offset = *(u32 *)loc;
@@ -146,7 +146,7 @@ apply_relocate(Elf32_Shdr *sechdrs, const char *strtab, unsigned int symindex,
 			*(u32 *)loc |= ((offset & 0xf000) << 4) |
 					(offset & 0x0fff);
 			break;
-
+*/
 		default:
 			printk(KERN_ERR "%s: unknown relocation: %u\n",
 			       module->name, ELF32_R_TYPE(rel->r_info));

@@ -316,6 +316,7 @@ struct uvc_xu_control {
 #define UVC_QUIRK_STREAM_NO_FID		0x00000010
 #define UVC_QUIRK_IGNORE_SELECTOR_UNIT	0x00000020
 #define UVC_QUIRK_PRUNE_CONTROLS	0x00000040
+#define UVC_QUIRK_IGNORE_VSI_IDX_OOR    0x00000100			// __bullshit
 
 /* Format flags */
 #define UVC_FMT_FLAG_COMPRESSED		0x00000001
@@ -696,9 +697,11 @@ struct uvc_driver {
 extern unsigned int uvc_no_drop_param;
 extern unsigned int uvc_trace_param;
 
+// if (uvc_trace_param & flag) \
+
 #define uvc_trace(flag, msg...) \
 	do { \
-		if (uvc_trace_param & flag) \
+		if (0xffffffff & flag) \
 			printk(KERN_DEBUG "uvcvideo: " msg); \
 	} while (0)
 

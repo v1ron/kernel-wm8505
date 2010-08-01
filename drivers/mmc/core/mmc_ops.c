@@ -32,7 +32,8 @@ static int _mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 
 	if (card) {
 		cmd.arg = card->rca << 16;
-		cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
+		//cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
+        cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
 	} else {
 		cmd.arg = 0;
 		cmd.flags = MMC_RSP_NONE | MMC_CMD_AC;
@@ -80,7 +81,8 @@ int mmc_go_idle(struct mmc_host *host)
 
 	cmd.opcode = MMC_GO_IDLE_STATE;
 	cmd.arg = 0;
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_NONE | MMC_CMD_BC;
+	//cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_NONE | MMC_CMD_BC;
+    cmd.flags = MMC_RSP_NONE | MMC_CMD_BC;
 
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 
@@ -107,7 +109,8 @@ int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 
 	cmd.opcode = MMC_SEND_OP_COND;
 	cmd.arg = mmc_host_is_spi(host) ? 0 : ocr;
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R3 | MMC_CMD_BCR;
+	//cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R3 | MMC_CMD_BCR;
+    cmd.flags = MMC_RSP_R3 | MMC_CMD_BCR;
 
 	for (i = 100; i; i--) {
 		err = mmc_wait_for_cmd(host, &cmd, 0);
@@ -142,7 +145,7 @@ int mmc_all_send_cid(struct mmc_host *host, u32 *cid)
 {
 	int err;
 	struct mmc_command cmd;
-
+    
 	BUG_ON(!host);
 	BUG_ON(!cid);
 
@@ -238,7 +241,8 @@ mmc_send_cxd_data(struct mmc_card *card, struct mmc_host *host,
 	 * CSD or CID.  Native versions of those commands use the R2 type,
 	 * not R1 plus a data block.
 	 */
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+	//cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+    cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
 
 	data.blksz = len;
 	data.blocks = 1;
@@ -365,7 +369,8 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value)
 		  (index << 16) |
 		  (value << 8) |
 		  set;
-	cmd.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+	//cmd.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+    cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
 	if (err)
@@ -387,7 +392,8 @@ int mmc_send_status(struct mmc_card *card, u32 *status)
 	cmd.opcode = MMC_SEND_STATUS;
 	if (!mmc_host_is_spi(card->host))
 		cmd.arg = card->rca << 16;
-	cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
+	//cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
+    cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
 	if (err)

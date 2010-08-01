@@ -792,6 +792,8 @@ typedef struct copr_msg {
 /* Note!	Number 31 cannot be used since the sign bit is reserved */
 #define SOUND_MIXER_NONE	31
 
+#define SOUND_MIXER_MIC_MUTE	63
+
 /*
  * The following unsupported macros are no longer functional.
  * Use SOUND_MIXER_PRIVATE# macros in future.
@@ -903,6 +905,10 @@ typedef struct copr_msg {
 #define SOUND_MIXER_WRITE_LINE1		MIXER_WRITE(SOUND_MIXER_LINE1)
 #define SOUND_MIXER_WRITE_LINE2		MIXER_WRITE(SOUND_MIXER_LINE2)
 #define SOUND_MIXER_WRITE_LINE3		MIXER_WRITE(SOUND_MIXER_LINE3)
+
+
+#define SOUND_MIXER_WRITE_MIC_MUTE		MIXER_WRITE(SOUND_MIXER_MIC_MUTE)
+
 
 /* Obsolete macros */
 #define SOUND_MIXER_WRITE_MUTE		MIXER_WRITE(SOUND_MIXER_MUTE)

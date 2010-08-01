@@ -508,6 +508,27 @@ ehci_hub_status_data (struct usb_hcd *hcd, char *buf)
 			    buf [1] |= 1 << (i - 7);
 			status = STS_PCD;
 		}
+		/*CharlesTu,090415,patch usb card reader plug/unplug fastly 
+		* port fail issue. Due to the port reset assert and not clear.
+		*/
+		if ((temp & PORT_RESET)
+				&& time_after (jiffies, ehci->reset_done [i])) {		
+					/*printk("port reset \n");*/
+					/* force reset to complete */
+					ehci_writel(ehci, temp & ~(PORT_RWC_BITS | PORT_RESET),
+					&ehci->regs->port_status [i]);
+					/* REVISIT:  some hardware needs 550+ usec to clear
+					* this bit; seems too long to spin routinely...
+					*/
+					retval = handshake(ehci,
+					&ehci->regs->port_status [i],
+					PORT_RESET, 0, 750);
+					if (retval != 0) {
+						ehci_err (ehci, "port %d reset error %d\n",
+						i + 1, retval);
+						
+					}
+				}
 	}
 	/* FIXME autosuspend idle root hubs */
 	spin_unlock_irqrestore (&ehci->lock, flags);
@@ -549,6 +570,147 @@ ehci_hub_descriptor (
 	desc->wHubCharacteristics = cpu_to_le16(temp);
 }
 
+/*{CharlesTu,2008.12.26,  for test mode --------------------------------*/
+#ifdef CONFIG_USB_EHCI_EHSET
+
+static int
+single_step_set_feature( struct usb_hcd *hcd, u8 port)
+{
+	struct usb_bus		*bus = hcd_to_bus(hcd);
+	struct usb_device	*udev;
+	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+	struct list_head	qtd_list;
+	struct list_head	setup_list;
+	struct list_head	data_list;
+	struct ehci_qtd		*qtd;
+	struct urb		urb;
+	struct usb_ctrlrequest	setup_packet;
+	char			data_buffer[USB_DT_DEVICE_SIZE];
+
+	ehci_info (ehci, "Testing SINGLE_STEP_SET_FEATURE\n");
+
+	if (bus == NULL) {
+		ehci_err (ehci, "EHSET: usb_bus pointer is NULL\n");
+		return -EPIPE;
+	}
+
+	udev = bus->root_hub;
+	if (udev == NULL) {
+		ehci_err (ehci, "EHSET: root_hub pointer is NULL\n");
+		return -EPIPE;
+	}
+       /* Charles, modify for MVL5 */
+	/*udev = udev->children[port - 1];*/
+	udev = udev->children[port ];
+	   
+	if (udev == NULL) {
+		ehci_err (ehci,  "EHSET: No test device found on port %d\n",
+				port);
+		return -EPIPE;
+	}
+
+	setup_packet.bRequestType = USB_DIR_IN;
+	setup_packet.bRequest = USB_REQ_GET_DESCRIPTOR;
+	setup_packet.wValue = (USB_DT_DEVICE << 8);
+	setup_packet.wIndex = 0;
+	setup_packet.wLength = USB_DT_DEVICE_SIZE;
+
+	INIT_LIST_HEAD (&qtd_list);
+	INIT_LIST_HEAD (&setup_list);
+	INIT_LIST_HEAD (&data_list);
+	
+	urb.transfer_buffer_length = USB_DT_DEVICE_SIZE; 
+	urb.dev = udev;
+	urb.pipe = usb_rcvctrlpipe(udev, 0);
+	/* Charles, modify for MVL5 */
+	urb.hcpriv = udev->ep0.hcpriv; 
+	/*urb.hcpriv = udev->ep0.hcpriv;  */
+	
+	urb.setup_packet = (char *)&setup_packet;
+	urb.transfer_buffer = data_buffer;
+	urb.transfer_flags = URB_HCD_DRIVER_TEST;	
+//	spin_lock_init(&urb.lock);
+	
+	urb.setup_dma = dma_map_single( hcd->self.controller,
+			urb.setup_packet,
+			sizeof (struct usb_ctrlrequest),
+			DMA_TO_DEVICE);
+	urb.transfer_dma = dma_map_single (
+			hcd->self.controller,
+			urb.transfer_buffer,
+			sizeof (struct usb_ctrlrequest),
+			DMA_TO_DEVICE);
+	
+	if (!urb.setup_dma || !urb.transfer_dma) {
+		ehci_err (ehci, "dma_map_single Failed\n");
+		return -EBUSY;
+	}
+
+	if (!qh_urb_transaction (ehci, &urb, &qtd_list, GFP_ATOMIC)) {
+		ehci_err (ehci, "qh_urb_transaction Failed\n");
+		return -EBUSY;
+	}
+
+	qtd =  container_of (qtd_list.next, struct ehci_qtd, qtd_list);
+	list_del_init (&qtd->qtd_list);
+	list_add (&qtd->qtd_list, &setup_list);
+	qtd =  container_of (qtd_list.next, struct ehci_qtd, qtd_list);
+	list_del_init (&qtd->qtd_list);
+	list_add (&qtd->qtd_list, &data_list);
+	qtd =  container_of (qtd_list.next, struct ehci_qtd, qtd_list);
+	list_del_init (&qtd->qtd_list);
+	ehci_qtd_free (ehci, qtd);
+
+	ehci_info (ehci, "Sending SETUP PHASE\n");
+	if (submit_async (ehci, &urb, &setup_list, GFP_ATOMIC)) { 
+		ehci_err (ehci, "Failed to queue up qtds\n");
+		return -EBUSY;
+	}
+
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(msecs_to_jiffies(15000));
+	urb.status = 0;
+	urb.actual_length = 0;
+
+	ehci_info (ehci, "Sending DATA PHASE\n");
+
+	if (submit_async (ehci, &urb, &setup_list, GFP_ATOMIC)) { 
+	
+		ehci_err (ehci, "Failed to queue up qtds\n");
+		return -EBUSY;
+	}
+
+	return 0;
+}
+static void stop_test(struct ehci_hcd *ehci)
+{
+	volatile unsigned int temp32 = 0;
+	//int ports = 0,i = 0;
+
+	/*reset HC */
+	temp32 = readl(&ehci->regs->command);	
+	ehci_info(ehci, "command before set reset 0x%8.8x\n", temp32);
+	temp32 |= 0x00000002;
+	writel(temp32, &ehci->regs->command);    
+	temp32 = readl (&ehci->regs->command);	
+	ehci_info(ehci, "command after set reset 0x%8.8x\n", temp32);
+	while ((readl(&ehci->regs->command)) & 0x00000002)
+		;   
+
+	/*set CF bit*/		
+	temp32 = readl(&ehci->regs->configured_flag);	
+	ehci_info(ehci, "CF before set CF 0x%8.8x\n", temp32);
+	if (!temp32)
+	writel (FLAG_CF, &ehci->regs->configured_flag);
+	temp32 = readl(&ehci->regs->configured_flag);	
+	while (!((readl(&ehci->regs->configured_flag)) & 0x00000001))
+		;   
+	ehci_info(ehci, "CF after set CF 0x%8.8x\n", temp32);
+
+
+}
+#endif
+/*CharlesTu}-------------------------------------------------------------*/
 /*-------------------------------------------------------------------------*/
 
 static int ehci_hub_control (
@@ -558,15 +720,18 @@ static int ehci_hub_control (
 	u16		wIndex,
 	char		*buf,
 	u16		wLength
-) {
+	) {
 	struct ehci_hcd	*ehci = hcd_to_ehci (hcd);
 	int		ports = HCS_N_PORTS (ehci->hcs_params);
 	u32 __iomem	*status_reg = &ehci->regs->port_status[
-				(wIndex & 0xff) - 1];
+		(wIndex & 0xff) - 1];
 	u32		temp, status;
 	unsigned long	flags;
 	int		retval = 0;
-	unsigned	selector;
+	//unsigned	selector;
+	/* Charles, modify for MVL5 */
+	u8	selector = 0;  
+	u8 port_num = 0;   
 
 	/*
 	 * FIXME:  support SetPortFeatures USB_PORT_FEAT_INDICATOR.
@@ -577,322 +742,365 @@ static int ehci_hub_control (
 
 	spin_lock_irqsave (&ehci->lock, flags);
 	switch (typeReq) {
-	case ClearHubFeature:
-		switch (wValue) {
-		case C_HUB_LOCAL_POWER:
-		case C_HUB_OVER_CURRENT:
-			/* no hub-wide feature/status flags */
-			break;
-		default:
-			goto error;
-		}
-		break;
-	case ClearPortFeature:
-		if (!wIndex || wIndex > ports)
-			goto error;
-		wIndex--;
-		temp = ehci_readl(ehci, status_reg);
-
-		/*
-		 * Even if OWNER is set, so the port is owned by the
-		 * companion controller, khubd needs to be able to clear
-		 * the port-change status bits (especially
-		 * USB_PORT_FEAT_C_CONNECTION).
-		 */
-
-		switch (wValue) {
-		case USB_PORT_FEAT_ENABLE:
-			ehci_writel(ehci, temp & ~PORT_PE, status_reg);
-			break;
-		case USB_PORT_FEAT_C_ENABLE:
-			ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_PEC,
-					status_reg);
-			break;
-		case USB_PORT_FEAT_SUSPEND:
-			if (temp & PORT_RESET)
-				goto error;
-			if (ehci->no_selective_suspend)
-				break;
-			if (temp & PORT_SUSPEND) {
-				if ((temp & PORT_PE) == 0)
+		case ClearHubFeature:
+			switch (wValue) {
+				case C_HUB_LOCAL_POWER:
+				case C_HUB_OVER_CURRENT:
+					/* no hub-wide feature/status flags */
+					break;
+				default:
 					goto error;
-				/* resume signaling for 20 msec */
-				temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
-				ehci_writel(ehci, temp | PORT_RESUME,
-						status_reg);
-				ehci->reset_done [wIndex] = jiffies
-						+ msecs_to_jiffies (20);
 			}
 			break;
-		case USB_PORT_FEAT_C_SUSPEND:
-			clear_bit(wIndex, &ehci->port_c_suspend);
-			break;
-		case USB_PORT_FEAT_POWER:
-			if (HCS_PPC (ehci->hcs_params))
-				ehci_writel(ehci,
-					  temp & ~(PORT_RWC_BITS | PORT_POWER),
-					  status_reg);
-			break;
-		case USB_PORT_FEAT_C_CONNECTION:
-			ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_CSC,
-					status_reg);
-			break;
-		case USB_PORT_FEAT_C_OVER_CURRENT:
-			ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_OCC,
-					status_reg);
-			break;
-		case USB_PORT_FEAT_C_RESET:
-			/* GetPortStatus clears reset */
-			break;
-		default:
-			goto error;
-		}
-		ehci_readl(ehci, &ehci->regs->command);	/* unblock posted write */
-		break;
-	case GetHubDescriptor:
-		ehci_hub_descriptor (ehci, (struct usb_hub_descriptor *)
-			buf);
-		break;
-	case GetHubStatus:
-		/* no hub-wide feature/status flags */
-		memset (buf, 0, 4);
-		//cpu_to_le32s ((u32 *) buf);
-		break;
-	case GetPortStatus:
-		if (!wIndex || wIndex > ports)
-			goto error;
-		wIndex--;
-		status = 0;
-		temp = ehci_readl(ehci, status_reg);
-
-		// wPortChange bits
-		if (temp & PORT_CSC)
-			status |= 1 << USB_PORT_FEAT_C_CONNECTION;
-		if (temp & PORT_PEC)
-			status |= 1 << USB_PORT_FEAT_C_ENABLE;
-
-		if ((temp & PORT_OCC) && !ignore_oc){
-			status |= 1 << USB_PORT_FEAT_C_OVER_CURRENT;
+		case ClearPortFeature:
+			if (!wIndex || wIndex > ports)
+				goto error;
+			wIndex--;
+			temp = ehci_readl(ehci, status_reg);
 
 			/*
-			 * Hubs should disable port power on over-current.
-			 * However, not all EHCI implementations do this
-			 * automatically, even if they _do_ support per-port
-			 * power switching; they're allowed to just limit the
-			 * current.  khubd will turn the power back on.
+			 * Even if OWNER is set, so the port is owned by the
+			 * companion controller, khubd needs to be able to clear
+			 * the port-change status bits (especially
+			 * USB_PORT_FEAT_C_CONNECTION).
 			 */
-			if (HCS_PPC (ehci->hcs_params)){
-				ehci_writel(ehci,
-					temp & ~(PORT_RWC_BITS | PORT_POWER),
-					status_reg);
-			}
-		}
 
-		/* whoever resumes must GetPortStatus to complete it!! */
-		if (temp & PORT_RESUME) {
-
-			/* Remote Wakeup received? */
-			if (!ehci->reset_done[wIndex]) {
-				/* resume signaling for 20 msec */
-				ehci->reset_done[wIndex] = jiffies
-						+ msecs_to_jiffies(20);
-				/* check the port again */
-				mod_timer(&ehci_to_hcd(ehci)->rh_timer,
-						ehci->reset_done[wIndex]);
-			}
-
-			/* resume completed? */
-			else if (time_after_eq(jiffies,
-					ehci->reset_done[wIndex])) {
-				clear_bit(wIndex, &ehci->suspended_ports);
-				set_bit(wIndex, &ehci->port_c_suspend);
-				ehci->reset_done[wIndex] = 0;
-
-				/* stop resume signaling */
-				temp = ehci_readl(ehci, status_reg);
-				ehci_writel(ehci,
-					temp & ~(PORT_RWC_BITS | PORT_RESUME),
-					status_reg);
-				retval = handshake(ehci, status_reg,
-					   PORT_RESUME, 0, 2000 /* 2msec */);
-				if (retval != 0) {
-					ehci_err(ehci,
-						"port %d resume error %d\n",
-						wIndex + 1, retval);
+			switch (wValue) {
+				case USB_PORT_FEAT_ENABLE:
+					ehci_writel(ehci, temp & ~PORT_PE, status_reg);
+					break;
+				case USB_PORT_FEAT_C_ENABLE:
+					ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_PEC,
+							status_reg);
+					break;
+				case USB_PORT_FEAT_SUSPEND:
+					if (temp & PORT_RESET)
+						goto error;
+					if (ehci->no_selective_suspend)
+						break;
+					if (temp & PORT_SUSPEND) {
+						if ((temp & PORT_PE) == 0)
+							goto error;
+						/* resume signaling for 20 msec */
+						temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
+						ehci_writel(ehci, temp | PORT_RESUME,
+								status_reg);
+						ehci->reset_done [wIndex] = jiffies
+							+ msecs_to_jiffies (20);
+					}
+					break;
+				case USB_PORT_FEAT_C_SUSPEND:
+					clear_bit(wIndex, &ehci->port_c_suspend);
+					break;
+				case USB_PORT_FEAT_POWER:
+					if (HCS_PPC (ehci->hcs_params))
+						ehci_writel(ehci,
+								temp & ~(PORT_RWC_BITS | PORT_POWER),
+								status_reg);
+					break;
+				case USB_PORT_FEAT_C_CONNECTION:
+					ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_CSC,
+							status_reg);
+					break;
+				case USB_PORT_FEAT_C_OVER_CURRENT:
+					ehci_writel(ehci, (temp & ~PORT_RWC_BITS) | PORT_OCC,
+							status_reg);
+					break;
+				case USB_PORT_FEAT_C_RESET:
+					/* GetPortStatus clears reset */
+					break;
+				default:
 					goto error;
-				}
-				temp &= ~(PORT_SUSPEND|PORT_RESUME|(3<<10));
 			}
-		}
-
-		/* whoever resets must GetPortStatus to complete it!! */
-		if ((temp & PORT_RESET)
-				&& time_after_eq(jiffies,
-					ehci->reset_done[wIndex])) {
-			status |= 1 << USB_PORT_FEAT_C_RESET;
-			ehci->reset_done [wIndex] = 0;
-
-			/* force reset to complete */
-			ehci_writel(ehci, temp & ~(PORT_RWC_BITS | PORT_RESET),
-					status_reg);
-			/* REVISIT:  some hardware needs 550+ usec to clear
-			 * this bit; seems too long to spin routinely...
-			 */
-			retval = handshake(ehci, status_reg,
-					PORT_RESET, 0, 750);
-			if (retval != 0) {
-				ehci_err (ehci, "port %d reset error %d\n",
-					wIndex + 1, retval);
-				goto error;
-			}
-
-			/* see what we found out */
-			temp = check_reset_complete (ehci, wIndex, status_reg,
-					ehci_readl(ehci, status_reg));
-		}
-
-		if (!(temp & (PORT_RESUME|PORT_RESET)))
-			ehci->reset_done[wIndex] = 0;
-
-		/* transfer dedicated ports to the companion hc */
-		if ((temp & PORT_CONNECT) &&
-				test_bit(wIndex, &ehci->companion_ports)) {
-			temp &= ~PORT_RWC_BITS;
-			temp |= PORT_OWNER;
-			ehci_writel(ehci, temp, status_reg);
-			ehci_dbg(ehci, "port %d --> companion\n", wIndex + 1);
-			temp = ehci_readl(ehci, status_reg);
-		}
-
-		/*
-		 * Even if OWNER is set, there's no harm letting khubd
-		 * see the wPortStatus values (they should all be 0 except
-		 * for PORT_POWER anyway).
-		 */
-
-		if (temp & PORT_CONNECT) {
-			status |= 1 << USB_PORT_FEAT_CONNECTION;
-			// status may be from integrated TT
-			status |= ehci_port_speed(ehci, temp);
-		}
-		if (temp & PORT_PE)
-			status |= 1 << USB_PORT_FEAT_ENABLE;
-
-		/* maybe the port was unsuspended without our knowledge */
-		if (temp & (PORT_SUSPEND|PORT_RESUME)) {
-			status |= 1 << USB_PORT_FEAT_SUSPEND;
-		} else if (test_bit(wIndex, &ehci->suspended_ports)) {
-			clear_bit(wIndex, &ehci->suspended_ports);
-			ehci->reset_done[wIndex] = 0;
-			if (temp & PORT_PE)
-				set_bit(wIndex, &ehci->port_c_suspend);
-		}
-
-		if (temp & PORT_OC)
-			status |= 1 << USB_PORT_FEAT_OVER_CURRENT;
-		if (temp & PORT_RESET)
-			status |= 1 << USB_PORT_FEAT_RESET;
-		if (temp & PORT_POWER)
-			status |= 1 << USB_PORT_FEAT_POWER;
-		if (test_bit(wIndex, &ehci->port_c_suspend))
-			status |= 1 << USB_PORT_FEAT_C_SUSPEND;
-
-#ifndef	VERBOSE_DEBUG
-	if (status & ~0xffff)	/* only if wPortChange is interesting */
-#endif
-		dbg_port (ehci, "GetStatus", wIndex + 1, temp);
-		put_unaligned_le32(status, buf);
-		break;
-	case SetHubFeature:
-		switch (wValue) {
-		case C_HUB_LOCAL_POWER:
-		case C_HUB_OVER_CURRENT:
+			ehci_readl(ehci, &ehci->regs->command);	/* unblock posted write */
+			break;
+		case GetHubDescriptor:
+			ehci_hub_descriptor (ehci, (struct usb_hub_descriptor *)
+					buf);
+			break;
+		case GetHubStatus:
 			/* no hub-wide feature/status flags */
+			memset (buf, 0, 4);
+			//cpu_to_le32s ((u32 *) buf);
 			break;
-		default:
-			goto error;
-		}
-		break;
-	case SetPortFeature:
-		selector = wIndex >> 8;
-		wIndex &= 0xff;
-		if (!wIndex || wIndex > ports)
-			goto error;
-		wIndex--;
-		temp = ehci_readl(ehci, status_reg);
-		if (temp & PORT_OWNER)
-			break;
+		case GetPortStatus:
+			if (!wIndex || wIndex > ports)
+				goto error;
+			wIndex--;
+			status = 0;
+			temp = ehci_readl(ehci, status_reg);
 
-		temp &= ~PORT_RWC_BITS;
-		switch (wValue) {
-		case USB_PORT_FEAT_SUSPEND:
-			if (ehci->no_selective_suspend)
-				break;
-			if ((temp & PORT_PE) == 0
-					|| (temp & PORT_RESET) != 0)
-				goto error;
-			ehci_writel(ehci, temp | PORT_SUSPEND, status_reg);
-			set_bit(wIndex, &ehci->suspended_ports);
-			break;
-		case USB_PORT_FEAT_POWER:
-			if (HCS_PPC (ehci->hcs_params))
-				ehci_writel(ehci, temp | PORT_POWER,
-						status_reg);
-			break;
-		case USB_PORT_FEAT_RESET:
-			if (temp & PORT_RESUME)
-				goto error;
-			/* line status bits may report this as low speed,
-			 * which can be fine if this root hub has a
-			 * transaction translator built in.
-			 */
-			if ((temp & (PORT_PE|PORT_CONNECT)) == PORT_CONNECT
-					&& !ehci_is_TDI(ehci)
-					&& PORT_USB11 (temp)) {
-				ehci_dbg (ehci,
-					"port %d low speed --> companion\n",
-					wIndex + 1);
-				temp |= PORT_OWNER;
-			} else {
-				ehci_vdbg (ehci, "port %d reset\n", wIndex + 1);
-				temp |= PORT_RESET;
-				temp &= ~PORT_PE;
+			// wPortChange bits
+			if (temp & PORT_CSC)
+				status |= 1 << USB_PORT_FEAT_C_CONNECTION;
+			if (temp & PORT_PEC)
+				status |= 1 << USB_PORT_FEAT_C_ENABLE;
+
+			if ((temp & PORT_OCC) && !ignore_oc){
+				status |= 1 << USB_PORT_FEAT_C_OVER_CURRENT;
 
 				/*
-				 * caller must wait, then call GetPortStatus
-				 * usb 2.0 spec says 50 ms resets on root
+				 * Hubs should disable port power on over-current.
+				 * However, not all EHCI implementations do this
+				 * automatically, even if they _do_ support per-port
+				 * power switching; they're allowed to just limit the
+				 * current.  khubd will turn the power back on.
 				 */
-				ehci->reset_done [wIndex] = jiffies
-						+ msecs_to_jiffies (50);
+				if (HCS_PPC (ehci->hcs_params)){
+					ehci_writel(ehci,
+							temp & ~(PORT_RWC_BITS | PORT_POWER),
+							status_reg);
+				}
 			}
-			ehci_writel(ehci, temp, status_reg);
-			break;
 
-		/* For downstream facing ports (these):  one hub port is put
-		 * into test mode according to USB2 11.24.2.13, then the hub
-		 * must be reset (which for root hub now means rmmod+modprobe,
-		 * or else system reboot).  See EHCI 2.3.9 and 4.14 for info
-		 * about the EHCI-specific stuff.
-		 */
-		case USB_PORT_FEAT_TEST:
-			if (!selector || selector > 5)
+			/* whoever resumes must GetPortStatus to complete it!! */
+			if (temp & PORT_RESUME) {
+
+				/* Remote Wakeup received? */
+				if (!ehci->reset_done[wIndex]) {
+					/* resume signaling for 20 msec */
+					ehci->reset_done[wIndex] = jiffies
+						+ msecs_to_jiffies(20);
+					/* check the port again */
+					mod_timer(&ehci_to_hcd(ehci)->rh_timer,
+							ehci->reset_done[wIndex]);
+				}
+
+				/* resume completed? */
+				else if (time_after_eq(jiffies,
+							ehci->reset_done[wIndex])) {
+					clear_bit(wIndex, &ehci->suspended_ports);
+					set_bit(wIndex, &ehci->port_c_suspend);
+					ehci->reset_done[wIndex] = 0;
+
+					/* stop resume signaling */
+					temp = ehci_readl(ehci, status_reg);
+					ehci_writel(ehci,
+							temp & ~(PORT_RWC_BITS | PORT_RESUME),
+							status_reg);
+					retval = handshake(ehci, status_reg,
+							PORT_RESUME, 0, 2000 /* 2msec */);
+					if (retval != 0) {
+						ehci_err(ehci,
+								"port %d resume error %d\n",
+								wIndex + 1, retval);
+						goto error;
+					}
+					temp &= ~(PORT_SUSPEND|PORT_RESUME|(3<<10));
+				}
+			}
+
+			/* whoever resets must GetPortStatus to complete it!! */
+			if ((temp & PORT_RESET)
+					&& time_after_eq(jiffies,
+						ehci->reset_done[wIndex])) {
+				status |= 1 << USB_PORT_FEAT_C_RESET;
+				ehci->reset_done [wIndex] = 0;
+
+				/* force reset to complete */
+				ehci_writel(ehci, temp & ~(PORT_RWC_BITS | PORT_RESET),
+						status_reg);
+				/* REVISIT:  some hardware needs 550+ usec to clear
+				 * this bit; seems too long to spin routinely...
+				 */
+				retval = handshake(ehci, status_reg,
+						PORT_RESET, 0, 750);
+				if (retval != 0) {
+					ehci_err (ehci, "port %d reset error %d\n",
+							wIndex + 1, retval);
+					goto error;
+				}
+
+				/* see what we found out */
+				temp = check_reset_complete (ehci, wIndex, status_reg,
+						ehci_readl(ehci, status_reg));
+			}
+
+			if (!(temp & (PORT_RESUME|PORT_RESET)))
+				ehci->reset_done[wIndex] = 0;
+
+			/* transfer dedicated ports to the companion hc */
+			if ((temp & PORT_CONNECT) &&
+					test_bit(wIndex, &ehci->companion_ports)) {
+				temp &= ~PORT_RWC_BITS;
+				temp |= PORT_OWNER;
+				ehci_writel(ehci, temp, status_reg);
+				ehci_dbg(ehci, "port %d --> companion\n", wIndex + 1);
+				temp = ehci_readl(ehci, status_reg);
+			}
+
+			/*
+			 * Even if OWNER is set, there's no harm letting khubd
+			 * see the wPortStatus values (they should all be 0 except
+			 * for PORT_POWER anyway).
+			 */
+
+			if (temp & PORT_CONNECT) {
+				status |= 1 << USB_PORT_FEAT_CONNECTION;
+				// status may be from integrated TT
+				status |= ehci_port_speed(ehci, temp);
+			}
+			if (temp & PORT_PE)
+				status |= 1 << USB_PORT_FEAT_ENABLE;
+
+			/* maybe the port was unsuspended without our knowledge */
+			if (temp & (PORT_SUSPEND|PORT_RESUME)) {
+				status |= 1 << USB_PORT_FEAT_SUSPEND;
+			} else if (test_bit(wIndex, &ehci->suspended_ports)) {
+				clear_bit(wIndex, &ehci->suspended_ports);
+				ehci->reset_done[wIndex] = 0;
+				if (temp & PORT_PE)
+					set_bit(wIndex, &ehci->port_c_suspend);
+			}
+
+			if (temp & PORT_OC)
+				status |= 1 << USB_PORT_FEAT_OVER_CURRENT;
+			if (temp & PORT_RESET)
+				status |= 1 << USB_PORT_FEAT_RESET;
+			if (temp & PORT_POWER)
+				status |= 1 << USB_PORT_FEAT_POWER;
+			if (test_bit(wIndex, &ehci->port_c_suspend))
+				status |= 1 << USB_PORT_FEAT_C_SUSPEND;
+
+#ifndef	VERBOSE_DEBUG
+			if (status & ~0xffff)	/* only if wPortChange is interesting */
+#endif
+				dbg_port (ehci, "GetStatus", wIndex + 1, temp);
+			put_unaligned_le32(status, buf);
+			break;
+		case SetHubFeature:
+			switch (wValue) {
+				case C_HUB_LOCAL_POWER:
+				case C_HUB_OVER_CURRENT:
+					/* no hub-wide feature/status flags */
+					break;
+				default:
+					goto error;
+			}
+			break;
+		case SetPortFeature:
+			selector = wIndex >> 8;
+			wIndex &= 0xff;
+			if (!wIndex || wIndex > ports)
 				goto error;
-			ehci_quiesce(ehci);
-			ehci_halt(ehci);
-			temp |= selector << 16;
-			ehci_writel(ehci, temp, status_reg);
+			wIndex--;
+			temp = ehci_readl(ehci, status_reg);
+			if (temp & PORT_OWNER)
+				break;
+
+			temp &= ~PORT_RWC_BITS;
+			switch (wValue) {
+				case USB_PORT_FEAT_SUSPEND:
+					if (ehci->no_selective_suspend)
+						break;
+					if ((temp & PORT_PE) == 0
+							|| (temp & PORT_RESET) != 0)
+						goto error;
+					ehci_writel(ehci, temp | PORT_SUSPEND, status_reg);
+					set_bit(wIndex, &ehci->suspended_ports);
+					break;
+				case USB_PORT_FEAT_POWER:
+					if (HCS_PPC (ehci->hcs_params))
+						ehci_writel(ehci, temp | PORT_POWER,
+								status_reg);
+					break;
+				case USB_PORT_FEAT_RESET:
+					if (temp & PORT_RESUME)
+						goto error;
+					/* line status bits may report this as low speed,
+					 * which can be fine if this root hub has a
+					 * transaction translator built in.
+					 */
+					if ((temp & (PORT_PE|PORT_CONNECT)) == PORT_CONNECT
+							&& !ehci_is_TDI(ehci)
+							&& PORT_USB11 (temp)) {
+						ehci_dbg (ehci,
+								"port %d low speed --> companion\n",
+								wIndex + 1);
+						temp |= PORT_OWNER;
+					} else {
+						ehci_vdbg (ehci, "port %d reset\n", wIndex + 1);
+						temp |= PORT_RESET;
+						temp &= ~PORT_PE;
+
+						/*
+						 * caller must wait, then call GetPortStatus
+						 * usb 2.0 spec says 50 ms resets on root
+						 */
+						ehci->reset_done [wIndex] = jiffies
+							+ msecs_to_jiffies (50);
+					}
+					ehci_writel(ehci, temp, status_reg);
+					break;
+
+					/* For downstream facing ports (these):  one hub port is put
+					 * into test mode according to USB2 11.24.2.13, then the hub
+					 * must be reset (which for root hub now means rmmod+modprobe,
+					 * or else system reboot).  See EHCI 2.3.9 and 4.14 for info
+					 * about the EHCI-specific stuff.
+					 */
+				case USB_PORT_FEAT_TEST:
+					ehci_info(ehci, "selector : %x\n ", selector);
+					//selector = (wIndex >> 8) & 0xff;
+					port_num = (wIndex) & 0xff;
+					ehci_info(ehci, "USB_PORT_FEAT_TEST : running test %x "
+							"on port %d\n", selector, port_num);
+					if (!selector || selector > 5)
+						ehci_info(ehci, "USB_PORT_FEAT_TEST 1: running test %x "
+								"on port %d\n", selector, port_num);
+
+					switch (selector) {
+						case USB_PORT_TEST_J:
+						case USB_PORT_TEST_K:
+						case USB_PORT_TEST_SE0_NAK:
+						case USB_PORT_TEST_PACKET:
+						case USB_PORT_TEST_FORCE_ENABLE:
+							ehci_quiesce(ehci);
+							ehci_halt(ehci);
+							stop_test(ehci);
+
+							temp = ehci_readl(ehci, &ehci->regs->command);
+							temp &= 0xfffffffe;
+							writel(temp, &ehci->regs->command);
+
+							temp = readl(&ehci->regs->port_status [(wIndex & 0x00ff)]);
+							temp &= 0xfff0ffff;
+							writel(temp, &ehci->regs->port_status[port_num]);
+							temp |= selector << 16;
+							writel(temp, &ehci->regs->port_status[port_num]);
+							break;
+#ifdef CONFIG_USB_EHCI_EHSET
+						case USB_PORT_TEST_SINGLE_STEP_SET_FEATURE:
+							spin_unlock_irqrestore (&ehci->lock, flags);
+							if (single_step_set_feature(hcd, port_num)) {
+								spin_lock_irqsave (&ehci->lock, flags);
+								goto error;
+							}
+							spin_lock_irqsave (&ehci->lock, flags);
+							break;
+#endif
+
+						default:
+							goto error;
+							ehci_quiesce(ehci);
+							ehci_halt(ehci);
+							temp |= selector << 16;
+							writel (temp, &ehci->regs->port_status[port_num - 1]);
+							//	ehci_writel(ehci, temp, status_reg);
+					}
+					break;
+
+					/*CharlesTu */
+				default:
+					goto error;
+			}
+			ehci_readl(ehci, &ehci->regs->command);	/* unblock posted writes */
 			break;
 
 		default:
-			goto error;
-		}
-		ehci_readl(ehci, &ehci->regs->command);	/* unblock posted writes */
-		break;
-
-	default:
 error:
-		/* "stall" on error */
-		retval = -EPIPE;
+			/* "stall" on error */
+			retval = -EPIPE;
 	}
 	spin_unlock_irqrestore (&ehci->lock, flags);
 	return retval;

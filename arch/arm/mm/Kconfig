@@ -170,7 +170,8 @@ config CPU_ARM925T
 
 # ARM926T
 config CPU_ARM926T
-	bool "Support ARM926T processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB
+	bool "Support ARM926T processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB || ARCH_WMT
+	default y if ARCH_AT91SAM9260 || ARCH_AT91SAM9261 || ARCH_WMT
 	select CPU_32v5
 	select CPU_ABRT_EV5TJ
 	select CPU_PABRT_NOIFAR
@@ -717,8 +718,3 @@ config CACHE_XSC3L2
 	select OUTER_CACHE
 	help
 	  This option enables the L2 cache on XScale3.
-
-config ARM_L1_CACHE_SHIFT
-	int
-	default 6 if ARCH_OMAP3
-	default 5

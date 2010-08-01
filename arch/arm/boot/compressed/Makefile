@@ -40,6 +40,12 @@ ifeq ($(CONFIG_PXA_SHARPSL),y)
 OBJS		+= head-sharpsl.o
 endif
 
+#{2008/08/06 james: build wmt startup code
+ifeq ($(CONFIG_ARCH_WMT),y)
+OBJS		+= head-wmt.o
+endif
+#}2008/08/06 james
+
 ifeq ($(CONFIG_CPU_BIG_ENDIAN),y)
 ifeq ($(CONFIG_CPU_CP15),y)
 OBJS		+= big-endian.o

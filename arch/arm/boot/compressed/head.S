@@ -38,10 +38,16 @@
 #else
 
 #include <mach/debug-macro.S>
+/*
+ *		.macro	writeb,	ch, rb
+ *		senduart \ch, \rb
+ *		.endm
+ */
 
-		.macro	writeb,	ch, rb
-		senduart \ch, \rb
-		.endm
+                .macro  writeb, rb
+                str     \rb, [r3, #0x00]        @ Transmit data register
+                .endm
+
 
 #if defined(CONFIG_ARCH_SA1100)
 		.macro	loadsp, rb
@@ -57,6 +63,11 @@
 		mov	\rb, #0x50000000
 		add	\rb, \rb, #0x4000 * CONFIG_S3C_LOWLEVEL_UART_PORT
 		.endm
+#elif defined(CONFIG_ARCH_WMT)
+    .macro  loadsp, rb
+    mov     \rb, #0xd8000000        @ wmt register base address
+    add     \rb, \rb, #0x00200000   @ uart0 base address offset
+    .endm
 #else
 		.macro	loadsp,	rb
 		addruart \rb
@@ -259,6 +270,12 @@ not_relocated:	mov	r0, #0
  * r8     = atags pointer
  * r9-r14 = corrupted
  */
+	/* 	ldr     r1, = 0xD8110000  
+        *         mov     r2, #0xFF
+        *         str     r2, [r1,#0x8C]
+        *         mov     r2, #0x00
+        *         str     r2, [r1,#0xB4]
+        */
 		add	r1, r5, r0		@ end of decompressed kernel
 		adr	r2, reloc_start
 		ldr	r3, LC1
@@ -430,8 +447,12 @@ __armv4_mmu_cache_on:
 		mcr	p15, 0, r0, c7, c10, 4	@ drain write buffer
 		mcr	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs
 		mrc	p15, 0, r0, c1, c0, 0	@ read control reg
-		orr	r0, r0, #0x5000		@ I-cache enable, RR cache replacement
-		orr	r0, r0, #0x0030
+#if defined (CONFIG_ARCH_WMT)
+    orr     r0, r0, #0x1000     @ I-cache enable, VIA chips
+#else
+    orr	    r0, r0, #0x5000		@ I-cache enable, RR cache replacement
+    orr	    r0, r0, #0x0030
+#endif
 		bl	__common_mmu_cache_on
 		mov	r0, #0
 		mcr	p15, 0, r0, c8, c7, 0	@ flush I,D TLBs
@@ -519,6 +540,7 @@ call_kernel:	bl	cache_clean_flush
 		mov	r0, #0			@ must be zero
 		mov	r1, r7			@ restore architecture number
 		mov	r2, r8			@ restore atags pointer
+/*	        kphex   r4, 8    */
 		mov	pc, r4			@ call kernel
 
 /*
@@ -667,6 +689,14 @@ proc_types:
 		b	__armv7_mmu_cache_on
 		b	__armv7_mmu_cache_off
 		b	__armv7_mmu_cache_flush
+
+    @ These match on the VIA chips
+
+    .word   0x41069265                  @ wm8510
+    .word   0xffffffff                  @ offset 4
+    b       __armv4_mmu_cache_on        @ offset 8
+    b       __armv4_mmu_cache_off       @ offset 12
+    b       __armv4_mmu_cache_flush     @ offset 16
 
 		.word	0			@ unrecognised type
 		.word	0
@@ -908,7 +938,8 @@ puts:		loadsp	r3
 1:		ldrb	r2, [r0], #1
 		teq	r2, #0
 		moveq	pc, lr
-2:		writeb	r2, r3
+/*2:		writeb	r2, r3*/
+2:		writeb	r2 
 		mov	r1, #0x00020000
 3:		subs	r1, r1, #1
 		bne	3b

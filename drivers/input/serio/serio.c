@@ -51,7 +51,7 @@ EXPORT_SYMBOL(serio_open);
 EXPORT_SYMBOL(serio_close);
 EXPORT_SYMBOL(serio_rescan);
 EXPORT_SYMBOL(serio_reconnect);
-
+//EXPORT_SYMBOL(serio_cleanup);
 /*
  * serio_mutex protects entire serio subsystem and is taken every time
  * serio port or driver registrered or unregistered.
@@ -789,8 +789,7 @@ static int serio_driver_remove(struct device *dev)
 	serio_disconnect_driver(serio);
 	return 0;
 }
-
-static void serio_cleanup(struct serio *serio)
+void serio_cleanup(struct serio *serio)
 {
 	mutex_lock(&serio->drv_mutex);
 	if (serio->drv && serio->drv->cleanup)

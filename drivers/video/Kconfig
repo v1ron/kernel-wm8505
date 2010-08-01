@@ -237,6 +237,206 @@ config FB_TILEBLITTING
 comment "Frame buffer hardware drivers"
 	depends on FB
 
+config FB_WMT
+	bool "WonderMedia Framebuffer Support"
+	depends on FB && ARCH_WMT
+		default y
+	---help---
+	  This is a framebuffer device driver for the WM8510 VPP module.
+	  If you plan to use the VGA/DVI display with your WM8510 based machine,
+	  say Y here.
+
+config LCD_WMT
+	bool "WonderMedia LCD Support"
+	depends on FB_WMT
+		default y
+	---help---
+	  This is a framebuffer device driver for the WMT LCD module.
+	  If you plan to use the LCD with your WMT based machine,
+	  say Y here.
+
+config HDMI_CAT6610_WMT
+	bool "WonderMedia ITE CAT6610 HDMI Support"
+	depends on FB_WMT
+		default y
+	---help---
+	  This is a device driver for ITE CAT6610 HDMI.
+	  If you plan to use the ITE CAT6610 with your WMT based machine,
+	  say Y here.
+
+config MAX_RESX
+	int	"Max horizontal resolution (64x)"
+	depends on FB_WMT
+	default 1408
+
+config MAX_RESY
+	int	"Max vertical resolution"
+	depends on FB_WMT
+	default 1050
+
+config DEFAULT_RESX
+	int	"Default horizontal resolution"
+	depends on FB_WMT
+	default 1024
+
+config DEFAULT_RESY
+	int	"Default vertical resolution"
+	depends on FB_WMT
+	default 768
+
+config DEFAULT_FPS
+	int	"Default display refresh rate"
+	depends on FB_WMT
+	default 60
+
+config VIDEO_BUFFER_SIZE
+    int "Size of memroy reserved for video buffer (KB)"
+    default "16384"
+	depends on FB_WMT
+    help
+      Set the reserved memory size. Memblock driver will reserved
+      the required memory for video use such as frame buffers, video
+      decode buffer, video display buffer, etc. This could prevent
+      video decoder from lacking continue memroy for decoding. The
+      reserved size will be Kbyte unit and auto change to 4 Kbytes
+      alignment.
+
+config FB_WMT_GE
+	bool "WonderMedia GE Framebuffer Support"
+	depends on FB && ARCH_WMT
+        default y
+	---help---
+	  This is WM8510 GE framebuffer driver.
+	  say Y here.
+
+config GE_BUFFER_SIZE
+	int "Forced GE buffer size (MiB)"
+	depends on FB_WMT_GE
+	default 0
+	help
+	  Forced GE buffer size. (0 = autodetect)
+
+config FB_WMT_VID
+	bool "WonderMedia VID Support"
+	depends on FB && ARCH_WMT
+        default y
+	---help---
+	  This is WM8510 VID driver.
+	  say Y here.
+choice
+	prompt "Select VID external device"
+	depends on (FB_WMT_VID)
+	default VIDDEV_AD7180
+
+config VIDDEV_AD7180
+	bool "ADV7180 selected"
+	help
+        If you have a ADV7180 tv decoder on board,
+	    say Y here.
+
+config VIDDEV_CUSTOMER
+	bool "CUSTOMER selected"
+	help
+        If you have a customer tv decoder on board,
+	    say Y here.
+
+endchoice  
+	  
+config FB_VT8500
+	bool "VIA VT8500 Framebuffer Support"
+	depends on FB && ARCH_VT8500
+        default y
+	---help---
+	  This is a framebuffer device driver for the VT8500 VPP module.
+	  If you plan to use the TVout display with your VT8500 based machine,
+	  say Y here.
+config EXTTV_VT8500
+	bool "VIA VT8500 External TV support"
+	depends on FB && FB_VT8500
+    default y
+	help
+		This is the external TV device driver for VIA VT8500 CCIR656 signal
+		out interface support.
+
+config EXTTV_ADV7393
+	bool "ADV7393 External TV support"
+	depends on EXTTV_VT8500
+    default y
+	help
+		This is the external TV device driver for VIA VT8500 CCIR656 signal
+		out interface.
+
+config VID_VT8500
+	bool "VIA VT8500 VID support"
+	depends on FB && FB_VT8500
+    default y
+	help
+		This is the external TV device driver for VIA VT8500 CCIR656 signal
+		out interface support.
+
+config LCD_VT8430
+	bool "VT8430 & VT8500 LCD support"
+	depends on FB && ARCH_VT8430 || ARCH_VT8500
+        default y
+	---help---
+	  This is a lcd device driver for the VT8430 & VT8500 LCD controller.
+	  If you plan to use the LCD display with your VT8430 based machine,
+	  say Y here.
+
+menu "Select LCD panel"
+	depends on LCD_VT8430
+
+config LCD_LW070AT111
+	bool "CHILIN 7 inch TFT LCD panel"
+	depends on ARCH_VT8430 || ARCH_VT8500
+	default y
+	---help---
+	  Say Y here if you intend to support CHILIN 7 inch TFT LCD panel.
+
+	  Model NO : LW070AT111
+	  Number of dots : 800 X RGB 18BIT X 480
+	  Display colors : 262144
+
+config LCD_DVI2VGA
+	bool "DVI for VGA(640X480)"
+	depends on ARCH_VT8430 || ARCH_VT8500
+	default y
+	---help---
+	  Say Y here if you intend to support DVI for VGA(640X480).
+
+	  Number of dots : 640 X RGB 24BIT X 480
+	  Display colors : 16777216
+
+config LCD_DVI2SVGA
+	bool "DVI for SVGA(800X600)"
+	depends on  ARCH_VT8430 || ARCH_VT8500
+	default y
+	---help---
+	  Say Y here if you intend to support DVI for SVGA(800X600).
+
+	  Number of dots : 800 X RGB 24BIT X 600
+	  Display colors : 16777216
+
+config LCD_DVI2XGA
+	bool "DVI for XGA(1024X768)"
+	depends on ARCH_VT8430 || ARCH_VT8500
+	default y
+	---help---
+	  Say Y here if you intend to support DVI for XGA(1024X768).
+
+	  Number of dots : 1024 X RGB 24BIT X 768
+	  Display colors : 16777216
+
+config LCD_DVI2WXGA
+	bool "DVI for WXGA(1280X800)"
+	depends on ARCH_VT8430 || ARCH_VT8500
+	default y
+	---help---
+	  Say Y here if you intend to support DVI for WXGA(1280X800).
+
+	  Number of dots : 1280 X RGB 24BIT X 800
+	  Display colors : 16777216
+endmenu
 config FB_CIRRUS
 	tristate "Cirrus Logic support"
 	depends on FB && (ZORRO || PCI)

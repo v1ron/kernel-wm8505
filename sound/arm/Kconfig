@@ -50,5 +50,41 @@ config SND_PXA2XX_AC97
 	  Say Y or M if you want to support any AC97 codec attached to
 	  the PXA2xx AC97 interface.
 
+config SOUND_WMT_I2S
+        tristate "WMT I2S Sound Driver"
+        depends on SOUND && ARCH_WMT
+        ---help---
+          Say Y here if you want to use the I2S sound driver on WMT EVB based
+          EVB.
+choice
+    prompt "I2S Codec Select"
+        depends on SOUND_WMT_I2S
+    default  I2S_Codec_VT1602
+config I2S_Codec_VT1602
+        bool "VT1602"
+        ---help---
+          Say Y here if you want to use VT1602 as the I2S Codec.
+endchoice          
+#
+# VIA1613 CODEC driver
+#
+config SOUND_WMT_AC97
+        tristate "WMT AC'97 Sound Driver"
+        depends on SOUND && ARCH_WMT
+        ---help---
+          Say Y here if you want to use the AC'97 sound driver on WMT based
+          EVB.
+
+choice
+    prompt "AC97 Codec Select"
+        depends on SOUND_WMT_AC97
+    default WMT_VT1613 
+config WMT_VT1613
+        bool "VT1613 function support"
+        depends on SOUND && ARCH_WMT && SOUND_WMT_AC97
+        ---help---
+          Say Y here if you are using the WMT with VIA1613 function support.
+endchoice          
+
 endif	# SND_ARM
 

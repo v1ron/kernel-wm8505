@@ -172,4 +172,7 @@
 
 #define BLOCK_EXT_MAJOR		259
 
+#define VID_MAJOR           241
+
+
 #endif

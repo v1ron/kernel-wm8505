@@ -847,7 +847,7 @@ struct file {
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt
-	const struct file_operations	*f_op;
+	struct file_operations	*f_op;// remove const by vincent
 	atomic_long_t		f_count;
 	unsigned int 		f_flags;
 	fmode_t			f_mode;

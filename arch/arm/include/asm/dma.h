@@ -1,7 +1,10 @@
 #ifndef __ASM_ARM_DMA_H
 #define __ASM_ARM_DMA_H
 
+typedef unsigned int dmach_t;
+
 #include <asm/memory.h>
+#include <asm/mach/dma.h>
 
 /*
  * This is the maximum virtual address which can be DMA'd from.
@@ -10,7 +13,7 @@
 #define MAX_DMA_ADDRESS	0xffffffff
 #endif
 
-#ifdef CONFIG_ISA_DMA_API
+//#ifdef CONFIG_ISA_DMA_API
 /*
  * This is used to support drivers written for the x86 ISA DMA API.
  * It should not be re-used except for that purpose.
@@ -19,9 +22,8 @@
 #include <asm/system.h>
 #include <asm/scatterlist.h>
 
-typedef unsigned int dmach_t;
 
-#include <mach/isa-dma.h>
+//#include <mach/isa-dma.h>
 
 /*
  * DMA modes
@@ -148,6 +150,6 @@ extern int isa_dma_bridge_buggy;
 #define isa_dma_bridge_buggy    (0)
 #endif
 
-#endif /* CONFIG_ISA_DMA_API */
+//#endif /* CONFIG_ISA_DMA_API */
 
 #endif /* __ASM_ARM_DMA_H */

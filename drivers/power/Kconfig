@@ -42,6 +42,11 @@ config BATTERY_DS2760
 	select W1_SLAVE_DS2760
 	help
 	  Say Y here to enable support for batteries with ds2760 chip.
+	  
+config BATTERY_WMT
+	tristate "wmt battery driver (wonder media & others)"
+	help
+	  Say Y here to enable support for batteries with wmt chip.	  
 
 config BATTERY_PMU
 	tristate "Apple PMU battery"

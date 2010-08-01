@@ -85,4 +85,9 @@
 #define ATTRIB_NORET  __attribute__((noreturn))
 #define NORET_AND     noreturn,
 
+#ifndef FASTCALL
+#define FASTCALL(x)     x
+#define fastcall
+#endif
+
 #endif

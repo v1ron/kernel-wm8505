@@ -225,7 +225,7 @@ static void expire_wake_lock(struct wake_lock *lock)
 /* Caller must acquire the list_lock spinlock */
 static void print_active_locks(int type)
 {
-	unsigned long irqflags;
+//	unsigned long irqflags;
 	struct wake_lock *lock;
 
 	BUG_ON(type >= WAKE_LOCK_TYPE_COUNT);
@@ -271,6 +271,10 @@ long has_wake_lock(int type)
 	return ret;
 }
 
+//--> added by howayhuo
+extern unsigned int lcd_blt_level;
+extern void send_ESC_key(void);
+//<-- end add
 static void suspend(struct work_struct *work)
 {
 	int ret;
@@ -302,6 +306,14 @@ static void suspend(struct work_struct *work)
 			pr_info("suspend: pm_suspend returned with no event\n");
 		wake_lock_timeout(&unknown_wakeup, HZ / 2);
 	}
+//--> added by howayhuo
+#ifdef CONFIG_EARLYSUSPEND
+	request_suspend_state(0);
+#endif
+    //in adroid system, if the backlight is cloased and  the freezing of user space  aborted, we send ESC key to to light the backlight
+    if (ret < 0 && lcd_blt_level < 2)
+        send_ESC_key();
+//<-- end
 }
 static DECLARE_WORK(suspend_work, suspend);
 

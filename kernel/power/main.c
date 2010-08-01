@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2003 Patrick Mochel
  * Copyright (c) 2003 Open Source Development Lab
- * 
+ *
  * This file is released under the GPLv2
  *
  */
@@ -330,7 +330,7 @@ int suspend_devices_and_enter(suspend_state_t state)
 		if (error)
 			goto Close;
 	}
-	suspend_console();
+//	suspend_console();  //removed by howayhuo
 	suspend_test_start();
 	error = device_suspend(PMSG_SUSPEND);
 	if (error) {
@@ -377,7 +377,7 @@ int suspend_devices_and_enter(suspend_state_t state)
 /**
  *	suspend_finish - Do final work before exiting suspend sequence.
  *
- *	Call platform code to clean up, restart processes, and free the 
+ *	Call platform code to clean up, restart processes, and free the
  *	console that we've allocated. This is not called for suspend-to-disk.
  */
 static void suspend_finish(void)
@@ -458,7 +458,7 @@ static int enter_state(suspend_state_t state)
  *	pm_suspend - Externally visible function for suspending system.
  *	@state:		Enumerated value of state to enter.
  *
- *	Determine whether or not value is within range, get state 
+ *	Determine whether or not value is within range, get state
  *	structure, and enter (above).
  */
 
@@ -482,7 +482,7 @@ struct kobject *power_kobj;
  *	'standby' (Power-On Suspend), 'mem' (Suspend-to-RAM), and
  *	'disk' (Suspend-to-Disk).
  *
- *	store() accepts one of those strings, translates it into the 
+ *	store() accepts one of those strings, translates it into the
  *	proper enumerated value, and initiates a suspend transition.
  */
 

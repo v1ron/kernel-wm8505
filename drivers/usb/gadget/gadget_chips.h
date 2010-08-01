@@ -8,23 +8,19 @@
  * (And avoiding all runtime comparisons in typical one-choice configs!)
  *
  * NOTE:  some of these controller drivers may not be available yet.
- * Some are available on 2.4 kernels; several are available, but not
- * yet pushed in the 2.6 mainline tree.
  */
-
-#ifndef __GADGET_CHIPS_H
-#define __GADGET_CHIPS_H
-
+#ifndef GADGET_CHIPS__
+#define GADGET_CHIPS__
 #ifdef CONFIG_USB_GADGET_NET2280
 #define	gadget_is_net2280(g)	!strcmp("net2280", (g)->name)
 #else
 #define	gadget_is_net2280(g)	0
 #endif
 
-#ifdef CONFIG_USB_GADGET_AMD5536UDC
-#define	gadget_is_amd5536udc(g)	!strcmp("amd5536udc", (g)->name)
+#ifdef CONFIG_USB_GADGET_WMT
+#define	gadget_is_wmt(g)	!strcmp("wmotgdev", (g)->name)
 #else
-#define	gadget_is_amd5536udc(g)	0
+#define	gadget_is_wmt(g)	0
 #endif
 
 #ifdef CONFIG_USB_GADGET_DUMMY_HCD
@@ -33,8 +29,8 @@
 #define	gadget_is_dummy(g)	0
 #endif
 
-#ifdef CONFIG_USB_GADGET_PXA25X
-#define	gadget_is_pxa(g)	!strcmp("pxa25x_udc", (g)->name)
+#ifdef CONFIG_USB_GADGET_PXA2XX
+#define	gadget_is_pxa(g)	!strcmp("pxa2xx_udc", (g)->name)
 #else
 #define	gadget_is_pxa(g)	0
 #endif
@@ -45,14 +41,12 @@
 #define	gadget_is_goku(g)	0
 #endif
 
-/* SH3 UDC -- not yet ported 2.4 --> 2.6 */
 #ifdef CONFIG_USB_GADGET_SUPERH
 #define	gadget_is_sh(g)		!strcmp("sh_udc", (g)->name)
 #else
 #define	gadget_is_sh(g)		0
 #endif
 
-/* not yet stable on 2.6 (would help "original Zaurus") */
 #ifdef CONFIG_USB_GADGET_SA1100
 #define	gadget_is_sa1100(g)	!strcmp("sa1100_udc", (g)->name)
 #else
@@ -65,7 +59,6 @@
 #define	gadget_is_lh7a40x(g)	0
 #endif
 
-/* handhelds.org tree (?) */
 #ifdef CONFIG_USB_GADGET_MQ11XX
 #define	gadget_is_mq11xx(g)	!strcmp("mq11xx_udc", (g)->name)
 #else
@@ -78,24 +71,16 @@
 #define	gadget_is_omap(g)	0
 #endif
 
-/* not yet ported 2.4 --> 2.6 */
 #ifdef CONFIG_USB_GADGET_N9604
 #define	gadget_is_n9604(g)	!strcmp("n9604_udc", (g)->name)
 #else
 #define	gadget_is_n9604(g)	0
 #endif
 
-/* various unstable versions available */
 #ifdef CONFIG_USB_GADGET_PXA27X
 #define	gadget_is_pxa27x(g)	!strcmp("pxa27x_udc", (g)->name)
 #else
 #define	gadget_is_pxa27x(g)	0
-#endif
-
-#ifdef CONFIG_USB_GADGET_ATMEL_USBA
-#define gadget_is_atmel_usba(g)	!strcmp("atmel_usba_udc", (g)->name)
-#else
-#define gadget_is_atmel_usba(g)	0
 #endif
 
 #ifdef CONFIG_USB_GADGET_S3C2410
@@ -116,14 +101,7 @@
 #define gadget_is_imx(g)	0
 #endif
 
-#ifdef CONFIG_USB_GADGET_FSL_USB2
-#define gadget_is_fsl_usb2(g)	!strcmp("fsl-usb2-udc", (g)->name)
-#else
-#define gadget_is_fsl_usb2(g)	0
-#endif
-
 /* Mentor high speed function controller */
-/* from Montavista kernel (?) */
 #ifdef CONFIG_USB_GADGET_MUSBHSFC
 #define gadget_is_musbhsfc(g)	!strcmp("musbhsfc_udc", (g)->name)
 #else
@@ -137,30 +115,10 @@
 #define gadget_is_musbhdrc(g)	0
 #endif
 
-/* from Montavista kernel (?) */
 #ifdef CONFIG_USB_GADGET_MPC8272
 #define gadget_is_mpc8272(g)	!strcmp("mpc8272_udc", (g)->name)
 #else
 #define gadget_is_mpc8272(g)	0
-#endif
-
-#ifdef CONFIG_USB_GADGET_M66592
-#define	gadget_is_m66592(g)	!strcmp("m66592_udc", (g)->name)
-#else
-#define	gadget_is_m66592(g)	0
-#endif
-
-/* Freescale CPM/QE UDC SUPPORT */
-#ifdef CONFIG_USB_GADGET_FSL_QE
-#define gadget_is_fsl_qe(g)	!strcmp("fsl_qe_udc", (g)->name)
-#else
-#define gadget_is_fsl_qe(g)	0
-#endif
-
-#ifdef CONFIG_USB_GADGET_CI13XXX
-#define gadget_is_ci13xxx(g)	(!strcmp("ci13xxx_udc", (g)->name))
-#else
-#define gadget_is_ci13xxx(g)	0
 #endif
 
 // CONFIG_USB_GADGET_SX2
@@ -219,42 +177,9 @@ static inline int usb_gadget_controller_number(struct usb_gadget *gadget)
 		return 0x16;
 	else if (gadget_is_mpc8272(gadget))
 		return 0x17;
-	else if (gadget_is_atmel_usba(gadget))
-		return 0x18;
-	else if (gadget_is_fsl_usb2(gadget))
-		return 0x19;
-	else if (gadget_is_amd5536udc(gadget))
-		return 0x20;
-	else if (gadget_is_m66592(gadget))
-		return 0x21;
-	else if (gadget_is_fsl_qe(gadget))
-		return 0x22;
-	else if (gadget_is_ci13xxx(gadget))
-		return 0x23;
+    else if (gadget_is_wmt(gadget))
+        return 0x18;
 	return -ENOENT;
 }
 
-
-/**
- * gadget_supports_altsettings - return true if altsettings work
- * @gadget: the gadget in question
- */
-static inline bool gadget_supports_altsettings(struct usb_gadget *gadget)
-{
-	/* PXA 21x/25x/26x has no altsettings at all */
-	if (gadget_is_pxa(gadget))
-		return false;
-
-	/* PXA 27x and 3xx have *broken* altsetting support */
-	if (gadget_is_pxa27x(gadget))
-		return false;
-
-	/* SH3 hardware just doesn't do altsettings */
-	if (gadget_is_sh(gadget))
-		return false;
-
-	/* Everything else is *presumably* fine ... */
-	return true;
-}
-
-#endif /* __GADGET_CHIPS_H */
+#endif
