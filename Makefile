@@ -1606,25 +1606,8 @@ BSP_VIA_SRCS = $(BSP_VIA_OBJS:.o=.c)
 
 BSP_VIA_SRCDIR = ../via_src_$(BSP_VERSION_NAME).$(MINOR_VERSION)
 
-ifeq ($(CROSS_COMPILE),arm_v4t_le-)
-	BSP_VIA_OBJDIR = ../via_obj.arm_v4t-$(BSP_VERSION_NAME).$(MINOR_VERSION)
-endif
+BSP_VIA_OBJDIR = ./via_obj.arm_v5t-2629.01
 
-ifeq ($(CROSS_COMPILE),arm_v5t_le-)
-	BSP_VIA_OBJDIR = ../via_obj.arm_v5t-$(BSP_VERSION_NAME).$(MINOR_VERSION)
-endif
-
-ifeq ($(CROSS_COMPILE),arm-9tdmi-linux-gnu-)
-	BSP_VIA_OBJDIR = ../via_obj.arm-9tdmi-$(BSP_VERSION_NAME).$(MINOR_VERSION)
-endif
-
-ifeq ($(CROSS_COMPILE),armv5t-softfloat-linux-gnu-)
-	BSP_VIA_OBJDIR = ../via_obj.armv5t-softfloat-$(BSP_VERSION_NAME).$(MINOR_VERSION)
-endif
-
-ifeq ($(BSP_VIA_OBJDIR),)
-	BSP_VIA_OBJDIR = ../via_obj-$(BSP_VERSION_NAME).$(MINOR_VERSION)
-endif
 via_bsp:
 	@echo copy all via source to $(BSP_VIA_SRCDIR)...
 	mkdir -p $(BSP_VIA_SRCDIR)
