@@ -240,7 +240,7 @@
 /* SD Status Register 0 */
 #define TH          BIT0
 #define TE          BIT1
-#define TA          BIT2
+//#define TA          BIT2 // another WTF
 #define RH          BIT3
 #define RF          BIT4
 #define PP          BIT5
@@ -417,12 +417,12 @@
 #define		AKE_SEQ_ERROR           0x00000008      /* Bit 3  */
 
 /* current status bit12 ~ bit9 */
-#define		IDLE                    0x00000000
+//#define		IDLE                    0x00000000
 #define		READY                   0x00000200
 #define		IDENT                   0x00000400
 #define		STBY                    0x00000600
 #define		TRAN                    0x00000800
-#define		DATA                    0x00000A00
+//#define		DATA                    0x00000A00 // WTF?!?
 #define		RCV                     0x00000C00
 #define		PRG                     0x00000E00
 #define		DIS                     0x00001000
