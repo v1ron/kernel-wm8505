@@ -29,7 +29,7 @@
 #include "wmt_mc.h"          /* memory controller */
 #include "wmt_dma.h"         /* dma controller */
 #include "wmt_scc.h"         /* system configuration controller */
-#include "wmt_sdmmc.h"       /* sd/mmc card controller */
+//#include "wmt_sdmmc.h"       /* sd/mmc card controller */ // <--- Removed due to total abuse of macro names!
 #include "wmt_uart.h"        /* uart controller */
 #include "wmt_rtc.h"         /* real time clock */
 #include "wmt_gpio.h"        /* gpio controller */

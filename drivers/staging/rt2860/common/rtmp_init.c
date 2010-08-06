@@ -1565,7 +1565,7 @@ retry:
 int NICInitializeAsic(struct rt_rtmp_adapter *pAd, IN BOOLEAN bHardReset)
 {
 	unsigned long Index = 0;
-	u8 vR0 = 0xff;
+	u8 R0 = 0xff;
 	u32 MacCsr12 = 0, Counter = 0;
 #ifdef RTMP_MAC_USB
 	u32 MacCsr0 = 0;
@@ -1709,12 +1709,12 @@ int NICInitializeAsic(struct rt_rtmp_adapter *pAd, IN BOOLEAN bHardReset)
 	/* Read BBP register, make sure BBP is up and running before write new data */
 	Index = 0;
 	do {
-		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R0, &vR0);
-		DBGPRINT(RT_DEBUG_TRACE, ("BBP version = %x\n", vR0));
-	} while ((++Index < 20) && ((vR0 == 0xff) || (vR0 == 0x00)));
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R0, &R0);
+		DBGPRINT(RT_DEBUG_TRACE, ("BBP version = %x\n", R0));
+	} while ((++Index < 20) && ((R0 == 0xff) || (R0 == 0x00)));
 	/*ASSERT(Index < 20); //this will cause BSOD on Check-build driver */
 
-	if ((vR0 == 0xff) || (vR0 == 0x00))
+	if ((R0 == 0xff) || (R0 == 0x00))
 		return NDIS_STATUS_FAILURE;
 
 	/* Initialize BBP register to default value */
@@ -2808,6 +2808,24 @@ void UserCfgInit(struct rt_rtmp_adapter *pAd)
 	RTMP_SET_PSFLAG(pAd, fRTMP_PS_CAN_GO_SLEEP);
 	DBGPRINT(RT_DEBUG_TRACE, ("<-- UserCfgInit\n"));
 }
+
+
+/**
+ * hex_to_bin - convert a hex digit to its real value
+ * @ch: ascii character represents hex digit
+ *
+ * PASTED FROM 2.6.35 KERNEL lib/hexdump.c
+ */
+int hex_to_bin(char ch)
+{
+        if ((ch >= '0') && (ch <= '9'))
+                return ch - '0';
+        ch = tolower(ch);
+        if ((ch >= 'a') && (ch <= 'f'))
+                return ch - 'a' + 10;
+        return -1;
+}
+
 
 /* IRQL = PASSIVE_LEVEL */
 /* */

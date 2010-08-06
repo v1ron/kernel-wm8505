@@ -29,6 +29,11 @@
 
 #include	"../rt_config.h"
 
+#ifndef usb_alloc_coherent
+// As this was backported from 2.6.35, missing these two
+#define usb_alloc_coherent usb_buffer_alloc
+#define usb_free_coherent usb_buffer_free
+#endif
 /*
 ========================================================================
 Routine Description:
