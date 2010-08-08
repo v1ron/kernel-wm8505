@@ -201,6 +201,7 @@ choice
 #{ 2008/08/06 James Add support WonderMedia Technology
 config ARCH_WMT
 	bool "WonderMedia Technology"
+	select ARCH_REQUIRE_GPIOLIB
 	help
 	  This enables support for systems based on a WonderMedia Technology system.	  
 #} 2008/08/06 James

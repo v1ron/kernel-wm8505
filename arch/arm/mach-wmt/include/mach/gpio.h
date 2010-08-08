@@ -20,6 +20,14 @@
 #ifndef __ASM_ARCH_GPIO_H
 #define __ASM_ARCH_GPIO_H
 
+/* default gpiolib support */
+#include <asm-generic/gpio.h>
+
+#define gpio_get_value        __gpio_get_value
+#define gpio_set_value        __gpio_set_value
+#define gpio_cansleep         __gpio_cansleep
+#define gpio_to_irq __gpio_to_irq
+
 /*
  * For GPIO_BASE + 0x0020 + (0x0020*n), n=0 to 2
  */

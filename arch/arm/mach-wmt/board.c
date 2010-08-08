@@ -115,10 +115,12 @@ static void __init wmt_map_io(void)
 }
 
 extern struct sys_timer wmt_timer;
+extern void wm8505_init_machine(void);
 
 MACHINE_START(WMT, "WMT")
     .phys_io        = 0xd8000000,
     .io_pg_offst    = (0xd8000000 >> 18) & 0xFFFC,
+    .init_machine   = wm8505_init_machine,
 
 #ifdef CONFIG_WMT_USE_BOOTLOADER_ATAG
 	.boot_params	= 0x00000100,
