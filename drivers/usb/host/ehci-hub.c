@@ -1057,8 +1057,9 @@ static int ehci_hub_control (
 						case USB_PORT_TEST_FORCE_ENABLE:
 							ehci_quiesce(ehci);
 							ehci_halt(ehci);
+#ifdef CONFIG_USB_EHCI_EHSET
 							stop_test(ehci);
-
+#endif
 							temp = ehci_readl(ehci, &ehci->regs->command);
 							temp &= 0xfffffffe;
 							writel(temp, &ehci->regs->command);

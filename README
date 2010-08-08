@@ -21,25 +21,25 @@ make menuconfig ARCH=arm
 
 Pre-existing configs are:
 
+* arch/arm/configs/eken_m001_debian
+
+  A current configuration that should be suitable for running debian or other
+  standard Linux distributions.
+
+
 * arch/arm/configs/android_wm8505_config
 * arch/arm/configs/wmt_defconfig
 
-  These two came like this with the source tarball.
+  These two came as-is with the source tarball.
 
 * arch/arm/configs/wm8505_initial_config
 
-  This file was the .config in the source tarball (different to the
+  This file was the .config that came as-is the source tarball (different to the
   above two configs.)
 
 * arch/arm/configs/eken_m001_factory_configuration
   
-  From /proc/config.gz on a factory Eken M001 kernel.
-
-* arch/arm/configs/eken_m001_debian
-
-  Currently just the factory Android kernel plus fbcon.ko
-  ("Framebuffer Console"), minus ANDROID_PARANOID_NETWORKING ("Only
-  allow certain groups to create sockets)
+  Dump of /proc/config.gz on a factory Eken M001 kernel (different again.)
 
 
 ******** BUILDING ********
@@ -51,14 +51,14 @@ Pre-existing configs are:
   make ubin modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
 
 This builds a uzImage.bin for uboot. Replace CROSS_COMPILE with your
-x-compiler as appropriate.
+cross-compiler as appropriate.
 
   make modules_install ARCH=arm INSTALL_MOD_PATH=/some/staging/path
 
 
 ******* u-boot script ******
 
-U-boot script saved in 'script/scriptcmd' on SD card, to read a scriptcmd:
+U-boot script saved in 'script/scriptcmd' on SD card. To read a scriptcmd:
 
   tail -c +72 scriptcmd
 
@@ -75,7 +75,7 @@ Scriptcmd has a line for kernel args:
 
   setenv bootargs mem=112M root=/dev/mmcblk0p2 lcdid=1 console=ttyS0,115200n
 
-WMT "special" args:
+Relevant args:
 
 * mem=112M 
   is also mem=109M on non-Android boots. Suspect extra 3M is video memory?!?
@@ -88,8 +88,43 @@ WMT "special" args:
   this case, you won't see any video on a tablet.)
 
 
-***** random notes *****
 
-* RT3070 USB Wifi driver is not in kernel tree (compiled separately)
+****** WiFi Driver ******
+
+The rt2870sta kernel module will drive the RT3070 WiFi USB stick in
+Eken M001 & friends. This was backported from kernel 2.6.35.
+
+You will need to do two additional things
+
+- Run these commands to turn on the Signal GPIO that powers the USB
+  stick inside the Eken. We'll probably come up with something better
+  eventually, but for now:
+
+  echo out > /sys/class/gpio/gpio2/direction
+  echo 1 > /sys/class/gpio/gpio2/value
+  modprobe rt2870sta
+
+  (NB: This means you can also power down the whole Wifi stick from 
+  userspace to save battery, if you want, by writing 0 to /value.)  
 
 
+- Install a firmware file to /lib/firmware/rt3070.bin. In debian, you
+  can install firmware-ralink from non-free. Alternatively, download
+  the USB firmwares from http://www.ralink.com.tw/support.php?s=2
+
+  The rt2870.bin firmware will do as long as it's recent.
+
+  Then udev _should_ automatically load the firmware, but it isn't
+  working atm. Here is a horrible, horrible hack to load it. DO NOT
+  USE THIS PERMANENTLY, ITS JUST HERE BECAUSE I'M TOO TIRED TO WORK
+  OUT SOMETHING BETTER RIGHT NOW.  :)
+  
+  ifconfig wlan0 up &
+  echo -n 1 > /sys/class/firmware/1-1/loading
+  cat /lib/firmware/rt3070.bin > /sys/class/firmware/1-1/data
+  echo -n 0 > /sys/class/firmware/1-1/loading
+
+
+
+
+  
