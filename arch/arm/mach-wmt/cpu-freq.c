@@ -39,36 +39,36 @@ typedef struct wmt_scale_s {
 wmt_scale_t wm8510_freqs[] = {
     /* khz, pll, cpu, ahb */
   // the khz values here are all a bit wrong
-  { 33001, 0x4, 2, 1 },
-  { 33002, 0x4, 2, 2 },
-  {   66001,  0x6, 2, 1 },
-  {   66002,  0x6, 2, 2 },
-    { 100001, 0x8, 2, 1 },
-    { 100002, 0x8, 2, 2 },
+  // Setting PLL below 0x4 (below = no PLL multiplier) seems to break AHB bus
+
+  { 66001, 0x4, 2, 1 },
+  //  { 66002, 0x4, 2, 2 },
+  {   99001,  0x6, 2, 1 },
+  //  {   99002,  0x6, 2, 2 },
     { 133001, 0x8, 2, 1 },			/* 250/25/25*/
-    { 133002, 0x8, 2, 2 },			/* 250/25/25*/
-    { 166001, 0xa, 2, 1 },			/* 250/125/125*/
+  //    { 133002, 0x8, 2, 2 },			/* 250/25/25*/
+  //    { 166001, 0xa, 2, 1 },			/* 250/125/125*/
     { 166002, 0xa, 2, 2 },			/* 250/125/125*/
     { 200002, 0xc, 2, 2 },			/* 450/225/112*/
-    { 200003, 0xc, 2, 3 },			/* 450/225/112		198000*/
+  //    { 200003, 0xc, 2, 3 },			/* 450/225/112		198000*/
     { 233002, 0xe, 2, 2 },			/* 500/250/125*/
-    { 233003, 0xe, 2, 3 },			/* 500/250/125		231000*/
+  //    { 233003, 0xe, 2, 3 },			/* 500/250/125		231000*/
     { 250002, 0xf, 2, 2 },			/* 250/25/25*/
-    { 250003, 0xf, 2, 3 },			/* 250/25/25			247500*/
+  //    { 250003, 0xf, 2, 3 },			/* 250/25/25			247500*/
     { 266002, 0x10, 2, 2 },			/* 250/125/125*/
-    { 266003, 0x10, 2, 3 },			/* 250/125/125		264000*/
+  //    { 266003, 0x10, 2, 3 },			/* 250/125/125		264000*/
     { 300002, 0x12, 2, 2 },			/* 450/225/112*/
-    { 300003, 0x12, 2, 3 },			/* 450/225/112		297000*/
+  //    { 300003, 0x12, 2, 3 },			/* 450/225/112		297000*/
     { 333002, 0x14, 2, 2 },			/*333 111	 330000*/
-    { 333003, 0x14, 2, 3 },			/*333 166*/
-	 { 366002, 0x16, 2, 2 }, // From here down is an educated guess
-	 { 366003, 0x16, 2, 3 }, 
+    { 333003, 0x14, 2, 2 },			/*333 166*/
+	 { 366002, 0x16, 2, 2 },
+  //	 { 366003, 0x16, 2, 3 }, 
 	 { 400002, 0x18, 2, 2 },
-	 { 400003, 0x18, 2, 3 },
-	 { 433003, 0x1A, 2, 3 },
-	 { 466003, 0x1C, 2, 3 },
+  //	 { 400003, 0x18, 2, 2 },a
+	 { 433002, 0x1A, 2, 2 },
+	 { 466002, 0x1C, 2, 2 },
   { 500003, 0x1E, 2, 3 }	 ,
-  { 533003, 0x1F, 2, 3}
+  { 533003, 0x1F, 2, 3 } // Setting 533Mhz with a /2 AHB scaler causes lockups. Not sure about 500Mhz
 };
 
 #define NR_FREQS        ARRAY_SIZE(wm8510_freqs)
@@ -127,8 +127,7 @@ unsigned int wmt_idx_to_freq(unsigned int idx)
 }
 
 /*
- * make sure that only the "userspace" governor is run -- anything else wouldn't make sense on
- * this platform, anyway.
+ * verify cpufreq policy settings
  */
 int wmt_verify_speed(struct cpufreq_policy *policy)
 {
@@ -270,7 +269,7 @@ static int wmt_target(struct cpufreq_policy *policy,
     freqs.new = wmt_idx_to_freq(idx);
     freqs.cpu = 0;
 
-	 printk("Requested step from %d to %d (idx %d)\n", freqs.old, freqs.new, idx);
+	 //	 printk("Requested step from %d to %d (idx %d)\n", freqs.old, freqs.new, idx);
 
     if (freqs.new != freqs.old) {
 			/*
@@ -290,7 +289,7 @@ static int wmt_target(struct cpufreq_policy *policy,
 			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
     }
 
-	 printk("Now running at %d\n", wm8510_arm_khz());
+	 //	 printk("Now running at %d\n", wm8510_arm_khz());
 
     return 0;
 }
@@ -303,10 +302,10 @@ static int __init wmt_cpu_init(struct cpufreq_policy *policy)
     policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
     policy->cpuinfo.min_freq = wm8510_freqs[0].khz;
     policy->cpuinfo.max_freq = wm8510_freqs[NR_FREQS-1].khz;
-    policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
+    policy->cpuinfo.transition_latency = 1000000; // 1ms, assumed?
     policy->cur = wm8510_arm_khz();
-    policy->min =  policy->cpuinfo.min_freq; // TODO: Make sane values here!
-    policy->max = policy->cpuinfo.max_freq;
+    policy->min =  133001;
+    policy->max = 466002;
     return 0;
 }
 
