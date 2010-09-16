@@ -38,6 +38,13 @@ typedef struct wmt_scale_s {
 
 wmt_scale_t wm8510_freqs[] = {
     /* khz, pll, cpu, ahb */
+  // the khz values here are all a bit wrong
+  { 33001, 0x4, 2, 1 },
+  { 33002, 0x4, 2, 2 },
+  {   66001,  0x6, 2, 1 },
+  {   66002,  0x6, 2, 2 },
+    { 100001, 0x8, 2, 1 },
+    { 100002, 0x8, 2, 2 },
     { 133001, 0x8, 2, 1 },			/* 250/25/25*/
     { 133002, 0x8, 2, 2 },			/* 250/25/25*/
     { 166001, 0xa, 2, 1 },			/* 250/125/125*/
@@ -54,6 +61,14 @@ wmt_scale_t wm8510_freqs[] = {
     { 300003, 0x12, 2, 3 },			/* 450/225/112		297000*/
     { 333002, 0x14, 2, 2 },			/*333 111	 330000*/
     { 333003, 0x14, 2, 3 },			/*333 166*/
+	 { 366002, 0x16, 2, 2 }, // From here down is an educated guess
+	 { 366003, 0x16, 2, 3 }, 
+	 { 400002, 0x18, 2, 2 },
+	 { 400003, 0x18, 2, 3 },
+	 { 433003, 0x1A, 2, 3 },
+	 { 466003, 0x1C, 2, 3 },
+  { 500003, 0x1E, 2, 3 }	 ,
+  { 533003, 0x1F, 2, 3}
 };
 
 #define NR_FREQS        ARRAY_SIZE(wm8510_freqs)
@@ -106,7 +121,7 @@ unsigned int wmt_idx_to_freq(unsigned int idx)
     if (idx < NR_FREQS)
 			freq = wm8510_freqs[idx].khz;
     else
-			freq = wm8510_freqs[NR_FREQS].khz;
+			freq = wm8510_freqs[NR_FREQS-1].khz;
 
     return freq;
 }
@@ -255,6 +270,8 @@ static int wmt_target(struct cpufreq_policy *policy,
     freqs.new = wmt_idx_to_freq(idx);
     freqs.cpu = 0;
 
+	 printk("Requested step from %d to %d (idx %d)\n", freqs.old, freqs.new, idx);
+
     if (freqs.new != freqs.old) {
 			/*
 			* Because current design we have all differnet ZAC2
@@ -273,6 +290,8 @@ static int wmt_target(struct cpufreq_policy *policy,
 			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
     }
 
+	 printk("Now running at %d\n", wm8510_arm_khz());
+
     return 0;
 }
 
@@ -282,12 +301,12 @@ static int __init wmt_cpu_init(struct cpufreq_policy *policy)
 			return -EINVAL;
 
     policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
-    policy->cur = wm8510_arm_khz();
-    policy->min = 133001;
-    policy->max = 333003;
-    policy->cpuinfo.min_freq = 133001;
-    policy->cpuinfo.max_freq = 333003;
+    policy->cpuinfo.min_freq = wm8510_freqs[0].khz;
+    policy->cpuinfo.max_freq = wm8510_freqs[NR_FREQS-1].khz;
     policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
+    policy->cur = wm8510_arm_khz();
+    policy->min =  policy->cpuinfo.min_freq; // TODO: Make sane values here!
+    policy->max = policy->cpuinfo.max_freq;
     return 0;
 }
 
@@ -304,5 +323,5 @@ static int __init wmt_cpufreq_init(void)
     return cpufreq_register_driver(&wmt_cpufreq_driver);
 }
 
-arch_initcall(wmt_cpufreq_init)
+arch_initcall(wmt_cpufreq_init);
 
