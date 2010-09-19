@@ -28,11 +28,26 @@
 
 #include "generic.h"
 
+#define REG_PM_STATUS *((volatile unsigned int *)0xd8130000)
+#define REG_PLL_A   *((volatile unsigned int *)0xd8130200)
+#define REG_CPU_DIV *((volatile unsigned int *)0xd8130300)
+#define REG_AHB_DIV *((volatile unsigned int *)0xd8130304)
+
+#define PM_UPDATE_MASK 0x1fff9b37
+#define PLL_PREDIV_BYPASS 1<<8
+#define PLL_MUL_MASK 0x1f
+#define CPU_DIV_MASK 0x1f
+#define AHB_DIV_MASK 0x07
+
+#define PM_WAIT_SETTLE do { } while (REG_PM_STATUS & PM_UPDATE_MASK)
+
 typedef struct wmt_scale_s {
-    unsigned int khz;       /* cpu_clk in khz */
-    unsigned char pll;      /* pll mul */
-    unsigned char cpu;      /* cpu div */
-    unsigned char ahb;      /* ahb div */
+  unsigned int khz;       /* cpu_clk in khz */
+  unsigned char pll;      /* pll mul */
+  unsigned char prediv_bypass;  /* pll predivider (/2) bypass */
+  unsigned char cpu;      /* cpu div */
+  unsigned char ahb;      /* ahb div */
+  unsigned char ram;      /* ddr ram div */
 
 } wmt_scale_t;
 
@@ -41,44 +56,42 @@ wmt_scale_t wm8510_freqs[] = {
   // the khz values here are all a bit wrong
   // Setting PLL below 0x4 (below = no PLL multiplier) seems to break AHB bus
 
-  { 66001, 0x4, 2, 1 },
-  //  { 66002, 0x4, 2, 2 },
-  {   99001,  0x6, 2, 1 },
-  //  {   99002,  0x6, 2, 2 },
-    { 133001, 0x8, 2, 1 },			/* 250/25/25*/
-  //    { 133002, 0x8, 2, 2 },			/* 250/25/25*/
-  //    { 166001, 0xa, 2, 1 },			/* 250/125/125*/
-    { 166002, 0xa, 2, 2 },			/* 250/125/125*/
-    { 200002, 0xc, 2, 2 },			/* 450/225/112*/
-  //    { 200003, 0xc, 2, 3 },			/* 450/225/112		198000*/
-    { 233002, 0xe, 2, 2 },			/* 500/250/125*/
-  //    { 233003, 0xe, 2, 3 },			/* 500/250/125		231000*/
-    { 250002, 0xf, 2, 2 },			/* 250/25/25*/
-  //    { 250003, 0xf, 2, 3 },			/* 250/25/25			247500*/
-    { 266002, 0x10, 2, 2 },			/* 250/125/125*/
-  //    { 266003, 0x10, 2, 3 },			/* 250/125/125		264000*/
-    { 300002, 0x12, 2, 2 },			/* 450/225/112*/
-  //    { 300003, 0x12, 2, 3 },			/* 450/225/112		297000*/
-    { 333002, 0x14, 2, 2 },			/*333 111	 330000*/
-    { 333003, 0x14, 2, 2 },			/*333 166*/
-	 { 366002, 0x16, 2, 2 },
-  //	 { 366003, 0x16, 2, 3 }, 
-	 { 400002, 0x18, 2, 2 },
-  //	 { 400003, 0x18, 2, 2 },a
-	 { 433002, 0x1A, 2, 2 },
-	 { 466002, 0x1C, 2, 2 },
-  { 500003, 0x1E, 2, 3 }	 ,
-  { 533003, 0x1F, 2, 3 } // Setting 533Mhz with a /2 AHB scaler causes lockups. Not sure about 500Mhz
+  { 66001, 0x4, 0, 2, 1, 2 },
+  { 99001,  0x6, 0, 2, 1, 2 },
+  { 133001, 0x8, 0, 2, 1, 2 },			/* 250/25/25*/
+  { 166002, 0xa, 0, 2, 2, 2 },			/* 250/125/125*/
+  { 200002, 0xc, 0, 2, 2, 2 },			/* 450/225/112*/
+  { 233002, 0xe, 0, 2, 2, 2 },			/* 500/250/125*/
+  { 250002, 0xf, 0, 2, 2, 2 },			/* 250/25/25*/
+  { 266002, 0x10, 0, 2, 2, 2 },			/* 250/125/125*/
+  { 300002, 0x12, 0, 2, 2, 2 },			/* 450/225/112*/
+  { 333003, 0x14, 0, 2, 2, 2 },			/*333 166*/
+  { 366002, 0x16, 0, 2, 2, 2 },
+  { 400002, 0x18, 0, 2, 2, 2 },
+  { 433002, 0x1A, 0, 2, 2, 2 },
+  { 466002, 0x1C, 0, 2, 2, 2 },
+  { 500003, 0x1E, 0, 2, 3, 2 },
+  { 516003, 0x1F, 0, 2, 3, 2 },
+  { 533003, 0x10, 1, 2, 3, 4 },
+  { 566003, 0x11, 1, 2, 3, 4 },
+  { 600003, 0x12, 1, 2, 3, 4 },
+  { 633003, 0x13, 1, 2, 3, 4 },
+  { 666003, 0x14, 1, 2, 3, 4 },
+  { 700003, 0x15, 1, 2, 3, 4 },
+  { 733003, 0x16, 1, 2, 3, 4 },
+  { 766003, 0x17, 1, 2, 3, 4 },
+  { 800003, 0x18, 1, 2, 3, 4 },
+  { 833003, 0x19, 1, 2, 3, 4 }
 };
 
 #define NR_FREQS        ARRAY_SIZE(wm8510_freqs)
 
+
 unsigned int wm8510_arm_khz(void)
 {
-	unsigned int value;
-	value = 33*1000*(*(unsigned int *)0xd8130200 & 0x1f)/(*(unsigned int *)0xd8130300 & 0x1f);
-
-    return value;
+	unsigned int pll_reg = REG_PLL_A;
+	unsigned int pll_prediv = (pll_reg & PLL_PREDIV_BYPASS) ? 1 : 2; 
+	return 66*1000*(pll_reg & PLL_MUL_MASK)/ (REG_CPU_DIV & CPU_DIV_MASK) / pll_prediv;
 }
 
 unsigned int wm8510_ahb_khz(void)
@@ -86,7 +99,7 @@ unsigned int wm8510_ahb_khz(void)
 	unsigned int value, cpu_freq;
 
 	cpu_freq = wm8510_arm_khz();
-	value = cpu_freq/(*(unsigned int *)0xd8130304);
+	value = cpu_freq / REG_AHB_DIV;
 
 	return value;
 }
@@ -189,51 +202,45 @@ static void wmt_restart_cpu(void)
 
 static void wm8510_speedstep(unsigned int idx)
 {
-	wmt_scale_t *np;
-
-	np = wmt_idx_to_parms(idx);
+	wmt_scale_t *np = wmt_idx_to_parms(idx);
+	unsigned int pll_desired = (np->pll & PLL_MUL_MASK) | ( np->prediv_bypass ? PLL_PREDIV_BYPASS : 0 );
 
 	if (np->ahb > 1) {
-		if (np->ahb != *(volatile unsigned int *)0xd8130304) {
-			while (PMCS_VAL & PMCS_BUSY)
-				;
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130304 = np->ahb;
-		}
-
-		if (np->pll != *(volatile unsigned int *)0xd8130200) {
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130200 = np->pll;
-		}
-
-		if (np->cpu != *(volatile unsigned int *)0xd8130300) {
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130300 = np->cpu;
-		}
+	  if (np->ahb != REG_AHB_DIV) {
+		 while (PMCS_VAL & PMCS_BUSY)
+			;
+		 PM_WAIT_SETTLE;
+		 REG_AHB_DIV = np->ahb;
+	  }
+	  
+	  if (pll_desired != REG_PLL_A) {
+		 PM_WAIT_SETTLE;
+		 REG_PLL_A = pll_desired;
+	  }
+	  
+	  if (np->cpu != REG_CPU_DIV) {
+		 PM_WAIT_SETTLE;
+		 REG_CPU_DIV = np->cpu;
+	  }
 	}	else {
-		if (np->pll != *(volatile unsigned int *)0xd8130200) {
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130200 = np->pll;
-		}
-		if (np->cpu != *(volatile unsigned int *)0xd8130300) {
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130300 = np->cpu;
-		}
-		if (np->ahb != *(volatile unsigned int *)0xd8130304) {
-			while (PMCS_VAL & PMCS_BUSY)
-				;
-			while ((*(volatile unsigned int *)0xd8130000) & 0x1fff9b37)
-				;
-			*(volatile unsigned int *)0xd8130304 = np->ahb;
-		}
+	  if (REG_PLL_A) {
+		 PM_WAIT_SETTLE;
+		 REG_PLL_A = pll_desired;
+	  }
+	  if (np->cpu != REG_CPU_DIV) {
+		 PM_WAIT_SETTLE;
+		 REG_CPU_DIV = np->cpu;
+	  }
+	  if (np->ahb != REG_AHB_DIV) {
+		 while (PMCS_VAL & PMCS_BUSY)
+			;
+		 PM_WAIT_SETTLE;
+		 REG_AHB_DIV = np->ahb;
+	  }
 	}
-	while ((*(volatile unsigned int *)0xd8130000)&0x1fff9b37)
-		;
+	while (REG_PM_STATUS & 0x1fff9b37)
+	  ;
+	
 	wmt_restart_cpu();
 }
 
@@ -309,11 +316,17 @@ static int __init wmt_cpu_init(struct cpufreq_policy *policy)
     return 0;
 }
 
+static struct freq_attr* wmt_cpufreq_attr[] = {
+        &cpufreq_freq_attr_scaling_available_freqs,
+        NULL,
+};
+
 static struct cpufreq_driver wmt_cpufreq_driver = {
     .flags			= CPUFREQ_STICKY,
     .verify         = wmt_verify_speed,
     .target         = wmt_target,
     .init           = wmt_cpu_init,
+	 .attr           = wmt_cpufreq_attr,
     .name           = "wmt",
 };
 
