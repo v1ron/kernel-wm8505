@@ -47,7 +47,6 @@ typedef struct wmt_scale_s {
   unsigned char prediv_bypass;  /* pll predivider (/2) bypass */
   unsigned char cpu;      /* cpu div */
   unsigned char ahb;      /* ahb div */
-  unsigned char ram;      /* ddr ram div */
 
 } wmt_scale_t;
 
@@ -56,32 +55,24 @@ wmt_scale_t wm8510_freqs[] = {
   // the khz values here are all a bit wrong
   // Setting PLL below 0x4 (below = no PLL multiplier) seems to break AHB bus
 
-  { 66001, 0x4, 0, 2, 1, 2 },
-  { 99001,  0x6, 0, 2, 1, 2 },
-  { 133001, 0x8, 0, 2, 1, 2 },			/* 250/25/25*/
-  { 166002, 0xa, 0, 2, 2, 2 },			/* 250/125/125*/
-  { 200002, 0xc, 0, 2, 2, 2 },			/* 450/225/112*/
-  { 233002, 0xe, 0, 2, 2, 2 },			/* 500/250/125*/
-  { 250002, 0xf, 0, 2, 2, 2 },			/* 250/25/25*/
-  { 266002, 0x10, 0, 2, 2, 2 },			/* 250/125/125*/
-  { 300002, 0x12, 0, 2, 2, 2 },			/* 450/225/112*/
-  { 333003, 0x14, 0, 2, 2, 2 },			/*333 166*/
-  { 366002, 0x16, 0, 2, 2, 2 },
-  { 400002, 0x18, 0, 2, 2, 2 },
-  { 433002, 0x1A, 0, 2, 2, 2 },
-  { 466002, 0x1C, 0, 2, 2, 2 },
-  { 500003, 0x1E, 0, 2, 3, 2 },
-  { 516003, 0x1F, 0, 2, 3, 2 },
-  { 533003, 0x10, 1, 2, 3, 4 },
-  { 566003, 0x11, 1, 2, 3, 4 },
-  { 600003, 0x12, 1, 2, 3, 4 },
-  { 633003, 0x13, 1, 2, 3, 4 },
-  { 666003, 0x14, 1, 2, 3, 4 },
-  { 700003, 0x15, 1, 2, 3, 4 },
-  { 733003, 0x16, 1, 2, 3, 4 },
-  { 766003, 0x17, 1, 2, 3, 4 },
-  { 800003, 0x18, 1, 2, 3, 4 },
-  { 833003, 0x19, 1, 2, 3, 4 }
+  { 50001,  0x04,  0, 2, 1 },  
+  { 75001,  0x06,  0, 2, 1 }, 
+  { 100001, 0x08,  0, 2, 1 },
+  { 125002, 0x0a,  0, 2, 2 },
+  { 150002, 0x0c,  0, 2, 2 }, 
+  { 175002, 0x0e,  0, 2, 2 },
+  { 200002, 0x10, 0, 2, 2 }, 
+  { 225002, 0x12, 0, 2, 2 },
+  { 250003, 0x14, 0, 2, 2 },
+  { 275002, 0x16, 0, 2, 2 },
+  { 300002, 0x18, 0, 2, 2 }, 
+  { 325002, 0x1A, 0, 2, 2 },
+  { 350002, 0x1C, 0, 2, 2 }, // Stock/boot kernel speed (except RAM)
+  { 375003, 0x1E, 0, 2, 3 }, // AHB @ 125Mhz
+  { 387003, 0x1F, 0, 2, 3 }, 
+
+  // Setting any faster than 387Mhz locks up nearly instantly. PLL prediv bypass seems to work, though
+  //  { 400002, 0x10, 1, 2, 3 }
 };
 
 #define NR_FREQS        ARRAY_SIZE(wm8510_freqs)
@@ -238,8 +229,7 @@ static void wm8510_speedstep(unsigned int idx)
 		 REG_AHB_DIV = np->ahb;
 	  }
 	}
-	while (REG_PM_STATUS & 0x1fff9b37)
-	  ;
+	PM_WAIT_SETTLE;
 	
 	wmt_restart_cpu();
 }
@@ -311,8 +301,8 @@ static int __init wmt_cpu_init(struct cpufreq_policy *policy)
     policy->cpuinfo.max_freq = wm8510_freqs[NR_FREQS-1].khz;
     policy->cpuinfo.transition_latency = 1000000; // 1ms, assumed?
     policy->cur = wm8510_arm_khz();
-    policy->min =  133001;
-    policy->max = 466002;
+    policy->min =  100001;
+    policy->max = 350002;
     return 0;
 }
 
