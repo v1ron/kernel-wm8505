@@ -67,7 +67,7 @@ wmt_scale_t wm8510_freqs[] = {
   { 275002, 0x16, 0, 2, 2 },
   { 300002, 0x18, 0, 2, 2 }, 
   { 325002, 0x1A, 0, 2, 2 },
-  { 350002, 0x1C, 0, 2, 2 }, // Stock/boot kernel speed (except RAM)
+  { 350002, 0x1C, 0, 2, 2 }, // Stock/boot kernel speed
   { 375003, 0x1E, 0, 2, 3 }, // AHB @ 125Mhz
   { 387003, 0x1F, 0, 2, 3 }, 
 
@@ -327,3 +327,4 @@ static int __init wmt_cpufreq_init(void)
 
 arch_initcall(wmt_cpufreq_init);
 
+EXPORT_SYMBOL(wm8510_ahb_khz);

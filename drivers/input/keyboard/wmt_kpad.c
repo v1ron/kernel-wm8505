@@ -37,6 +37,8 @@
 #include <mach/wmt_kpad.h>
 #include <linux/suspend.h>
 
+extern unsigned int wm8510_ahb_khz(void);
+
 /* Debug macros */
 #ifdef DEBUG
 #define DPRINTK(fmt, args...) printk(KERN_ALERT "%s: " fmt, __func__ , ## args)
