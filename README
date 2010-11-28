@@ -12,10 +12,11 @@ for the original linux readme.txt.)
 
 - Appropriate ARM cross-compiler toolchain. Make sure it has EABI support.
 
-  I've been using Emdebian's toolchain to compile from an Ubuntu host, 
-  follow the steps here: http://wiki.debian.org/EmdebianToolchain#Getthebinaries
-  (you don't need all those packages to just compile a kernel, but they don't hurt.)
-  		 
+  I've been using Emdebian's toolchain to compile from an Ubuntu host,
+  follow the steps under "Get the Binaries" on emdebian wiki:
+    http://wiki.debian.org/EmdebianToolchain#Getthebinaries
+  (you don't need all those packages listed there to just compile a kernel, 
+  but they don't hurt.) 
 
 ******** CONFIG **********
 
