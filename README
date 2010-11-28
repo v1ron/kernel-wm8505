@@ -10,14 +10,16 @@ for the original linux readme.txt.)
 
 ******** PREREQUISITES ********
 
-- Appropriate ARM cross-compiler toolchain (I've been using Emdebian's
-  but you can use whatever you want.)
+- Appropriate ARM cross-compiler toolchain. Make sure it has EABI support.
 
+  I've been using Emdebian's toolchain to compile from an Ubuntu host, 
+  follow the steps here: http://wiki.debian.org/EmdebianToolchain#Getthebinaries
+  (you don't need all those packages to just compile a kernel, but they don't hurt.)
+  		 
 
 ******** CONFIG **********
 
 make menuconfig ARCH=arm
-
 
 Pre-existing configs are:
 
@@ -26,6 +28,12 @@ Pre-existing configs are:
   A current configuration that should be suitable for running debian or other
   standard Linux distributions.
 
+* arch/arm/configs/eken_m001_android
+
+  This is the config I'm currently using for Android.
+
+
+*** OLDER CONFIGS (MAY NOT WORK) ***
 
 * arch/arm/configs/android_wm8505_config
 * arch/arm/configs/wmt_defconfig
@@ -44,6 +52,9 @@ Pre-existing configs are:
 
 ******** BUILDING ********
 
+Two steps to compile:
+
+
   make via_obj
 
 (Copies the binary blob .os in to place)
@@ -52,6 +63,17 @@ Pre-existing configs are:
 
 This builds a uzImage.bin for uboot. Replace CROSS_COMPILE with your
 cross-compiler as appropriate.
+
+
+NB: If you are building for Android, and you want to use some of the
+binary-only kernel modules that came with Android, then you need to
+force the kernel revision (horrible, but even WM seem to do it in
+their Android releases):
+
+make ubin modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty
+
+
+To install the modules somewhere:
 
   make modules_install ARCH=arm INSTALL_MOD_PATH=/some/staging/path
 
@@ -91,10 +113,13 @@ Relevant args:
 
 ****** WiFi Driver ******
 
-The rt2870sta kernel module will drive the RT3070 WiFi USB stick in
-Eken M001 & friends. This was backported from kernel 2.6.35.
+This tree contains the rt2870sta kernel module, backported from kernel
+2.6.35. I have had mixed success with this driver, you may also want
+to try Ralink's OEM source release driver (especially on Android.) 
 
-You will need to do two additional things
+However, here are the steps for rt2870sta:
+
+To use this module, you will need to do two additional things:
 
 - Run these commands to turn on the Signal GPIO that powers the USB
   stick inside the Eken. We'll probably come up with something better
@@ -108,23 +133,15 @@ You will need to do two additional things
   userspace to save battery, if you want, by writing 0 to /value.)  
 
 
-- Install a firmware file to /lib/firmware/rt3070.bin. In debian, you
+- Install a firmware file. To get a firmware file in debian, you
   can install firmware-ralink from non-free. Alternatively, download
   the USB firmwares from http://www.ralink.com.tw/support.php?s=2
 
   The rt2870.bin firmware will do as long as it's recent.
 
-  Then udev _should_ automatically load the firmware, but it isn't
-  working atm. Here is a horrible, horrible hack to load it. DO NOT
-  USE THIS PERMANENTLY, ITS JUST HERE BECAUSE I'M TOO TIRED TO WORK
-  OUT SOMETHING BETTER RIGHT NOW.  :)
-  
-  ifconfig wlan0 up &
-  echo -n 1 > /sys/class/firmware/1-1/loading
-  cat /lib/firmware/rt3070.bin > /sys/class/firmware/1-1/data
-  echo -n 0 > /sys/class/firmware/1-1/loading
-
-
+  The easiest way to get the firmware to load is to compile it
+  directly into the kernel (under Device Drivers -> Generic Driver
+  Options -> Include in-kernel firmware blobs...)
 
 
   
