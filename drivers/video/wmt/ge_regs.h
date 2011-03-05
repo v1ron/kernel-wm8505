@@ -126,7 +126,8 @@
 #define GEIO_RESERVED1		_IO(GEIO_MAGIC, 1)	/* VQ_UPDATE */
 #define GEIO_RESERVED2		_IO(GEIO_MAGIC, 2)	/* VQ_SYNC */
 #define GEIO_ROTATE		_IOW(GEIO_MAGIC, 3, void *)
-#define GEIO_RESERVED3		_IO(GEIO_MAGIC, 4)
+//##define GEIO_COPYBLT		_IOW(GEIO_MAGIC, 4, void *)
+#define GEIO_STRETCH_BLIT      _IOW(GEIO_MAGIC, 4, void *)
 #define GEIOGET_CHIP_ID		_IOR(GEIO_MAGIC, 5, unsigned int)
 #define GEIOSET_AMX_EN		_IO(GEIO_MAGIC, 6)
 #define GEIO_RESERVED4		_IO(GEIO_MAGIC, 7)	/* AMX_HOLD */

@@ -67,6 +67,7 @@ WonderMedia Technologies, Inc.
  * @author: Vincent Chen < vincentchen@via.com.tw >
  */
 
+#include <linux/delay.h>
 #include "ge_regs.h"
 
 /* GE core functions */
@@ -123,7 +124,8 @@ INLINE void ge_wait_sync(ge_info_t *geinfo)
 				!(regs->ge_status & BIT2));
 		}
 	} else {
-		while (regs->ge_status & BIT2);
+		while (regs->ge_status & BIT2)
+			msleep_interruptible(1); /* 1 ms */
 		regs->ge_int_flag |= ~0;
 	}
 }
@@ -220,7 +222,8 @@ INLINE void ge_wait_sync(ge_info_t *geinfo)
 	if (regs->ge_int_en & BIT8) {
 		ioctl(geinfo->fd, GEIO_WAIT_SYNC, 1);
 	} else {
-		while (regs->ge_status & BIT2);
+		while (regs->ge_status & BIT2)
+			msleep_interruptible(1); /* 1 ms */
 		regs->ge_int_flag |= ~0;
 	}
 }
@@ -291,7 +294,8 @@ INLINE void ge_wait_sync(ge_info_t *geinfo)
 	regs = geinfo->mmio;
 	regs->ge_int_en = 0; /* disable interrupt */
 
-	while (regs->ge_status & BIT2);
+	while (regs->ge_status & BIT2)
+			msleep_interruptible(1); /* 1 ms */
 	regs->ge_int_flag |= ~0;
 }
 

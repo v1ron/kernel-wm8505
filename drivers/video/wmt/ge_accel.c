@@ -50,6 +50,7 @@ WonderMedia Technologies, Inc.
  */
 
 #include <linux/sched.h>
+#include <linux/android_pmem.h>
 #include "ge_accel.h"
 #include "vpp.h"
 
@@ -71,6 +72,13 @@ DECLARE_WAIT_QUEUE_HEAD(ge_wq);
 static ge_info_t *geinfo;
 
 
+typedef struct {
+    ge_surface_t    src;
+    ge_surface_t    dst;
+    int         rotate;
+} geio_blit_req;
+
+int ge_stretch_blit(ge_surface_t * src, ge_surface_t * dst, int rotate);
 /**************************
  *    Export functions    *
  **************************/
@@ -118,7 +126,8 @@ static irqreturn_t ge_interrupt(int irq, void *dev_id,
 		printk("%s: GE Engine Time-Out Status! \n", __func__);
 		ge_regs->ge_eng_en = 0;
 		ge_regs->ge_eng_en = 1;
-		while (ge_regs->ge_status & (BIT5 | BIT4 | BIT3));
+		while (ge_regs->ge_status & (BIT5 | BIT4 | BIT3))
+			msleep_interruptible(1); /* 1 ms */
 	}
 
 	/* Clear GE interrupt flags. */
@@ -257,6 +266,7 @@ int ge_init(struct fb_info *info)
 		break;
 	}
 
+#ifdef USE_OLD_FLIP
 	amx_get_surface(geinfo, 0, &cs);
 
 	if (!g_vpp.govrh_preinit && memcmp(&cs, &s, sizeof(ge_surface_t))) {
@@ -270,7 +280,31 @@ int ge_init(struct fb_info *info)
 
 	amx_show_surface(geinfo, 0, &s, 0, 0); /* id:0, x:0, y:0 */
 	amx_sync(geinfo);
-
+#else
+	regs = geinfo->mmio;
+	regs->disp_x_end = var->xres;
+	regs->disp_y_end = var->yres;
+	regs->g1_cd = (s.pixelformat) >> 4;
+	regs->g1_amx_hm = (s.pixelformat) & 0xf;
+	regs->color_depth = (s.pixelformat) >> 4;
+	regs->hm_sel = (s.pixelformat) & 0xf;
+	regs->g1_fg_addr = info->fix.smem_start;
+	if (info->var.yres_virtual != info->var.yres)
+	    regs->g1_bg_addr = info->fix.smem_start + (var->yres * var->xres_virtual) * (var->bits_per_pixel >> 3);
+	regs->g1_fb_sel = 0;
+	regs->g1_fbw = var->xres;
+	regs->g1_hcrop = 0;
+	regs->g1_vcrop = 0;
+	regs->g1_x_start = 0;
+	regs->g1_y_start = 0;
+	regs->g1_x_end = var->xres - 1;
+	regs->g1_y_end = var->yres - 1;
+	regs->g1_amx_en = 1;
+	
+	regs->ge_eng_en = 1;
+	
+	amx_sync(geinfo);
+#endif
 	return 0;
 }
 
@@ -378,6 +412,12 @@ int ge_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
 					 args[4], args[5]);
 		}
 		break;
+	case GEIO_STRETCH_BLIT:
+		{
+		    geio_blit_req *req = (geio_blit_req*)arg;
+		    ret = ge_stretch_blit(&req->src, &req->dst, req->rotate);
+		}
+		break;
 	default:
 		ret = -1;
 	}
@@ -423,7 +463,7 @@ int wait_vsync(void)
 		REG_VAL32(0xd8050f04) |= 0x4; /* VBIE */
 
 		while (!(REG_VAL32(0xd8050f04) & 0x4))
-			msleep_interruptible(10); /* 10 ms */
+			msleep_interruptible(1); /* 1 ms */
 	}
 
 	return 0;
@@ -460,6 +500,7 @@ int ge_release(struct fb_info *info)
  */
 int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 {
+#ifdef USE_OLD_FLIP
 	ge_surface_t s;
 	unsigned int offset;
 
@@ -488,13 +529,16 @@ int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 	s.addr = info->fix.smem_start;
 	s.xres = var->xres;
 	s.yres = var->yres;
-	s.xres_virtual = var->xres_virtual;
-	s.yres_virtual = var->yres_virtual;
+	s.xres_virtual = var->xres;//_virtual;
+	s.yres_virtual = var->yres;//_virtual;
 	s.x = 0;
 	s.y = 0;
-	offset = var->yoffset * var->xres_virtual + var->xoffset;
-	offset *= var->bits_per_pixel >> 3;
-	s.addr += offset;
+	if (var->yoffset)
+	{
+	    offset = var->yoffset * var->xres_virtual + var->xoffset;
+	    offset *= var->bits_per_pixel >> 3;
+	    s.addr += offset;
+	}
 #endif
 #ifdef SW_CURSOR_FOR_ANDROID
 	// back up the cursor info, we restore the bitmap of frone buffer, 
@@ -547,7 +591,13 @@ int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 
 	amx_show_surface(geinfo, 0, &s, 0, 0); /* id:0, x:0, y:0 */
 	amx_sync(geinfo);
-
+#else
+	volatile struct ge_regs_8430 *regs;
+	
+	regs = geinfo->mmio;
+	regs->g1_fb_sel = var->yoffset ? 1 : 0;
+	amx_sync(geinfo);
+#endif
 	return 0;
 }
 
@@ -822,4 +872,84 @@ void ge_simple_blit(unsigned int phy_src, unsigned int phy_dst,
 	ge_unlock(geinfo);
 }
 
+static inline int get_img(int fd, ge_surface_t * img, struct file ** filep, unsigned long * len)
+{
+    unsigned long vstart, start;
+    if (!get_pmem_file(fd, &start, &vstart, len, filep))
+    {
+        img->addr += start;
+        return 0;
+    }
+    return -1;
+}
 
+static inline void flush_img(ge_surface_t * img, struct file * filep, unsigned long offset, unsigned long len)
+{
+    flush_pmem_file(filep, offset, len);
+}
+
+static inline void free_img(ge_surface_t * img, struct file * filep, unsigned long offset, unsigned long len)
+{
+    put_pmem_file(filep);
+}
+
+int ge_stretch_blit(ge_surface_t * src, ge_surface_t * dst, int rotate)
+{
+    struct file *srcf = 0,* dstf = 0;
+    unsigned long src_len;
+    unsigned long dst_len;
+    unsigned int src_offset=0;
+    unsigned int dst_offset=0;
+
+    int src_fd = src->pixelformat >> 16;
+    if (src_fd) // FIXME: hack
+    {
+	src_offset = src->addr;
+	if (get_img(src_fd, src, &srcf, &src_len) < 0)
+	{
+	    printk("Not resolved srt pmem file\n");
+	    return -1;
+	}
+	src->pixelformat &= 0xFFFF;
+    }
+    int dst_fd = src->pixelformat >> 16;
+    if (dst_fd) // FIXME: hack
+    {
+	dst_offset = dst->addr;
+	if (get_img(dst_fd, dst, &dstf, &dst_len) < 0)
+	{
+	    printk("Not resolved dst pmem file\n");
+	    if (src_fd)
+		free_img(src, srcf, src_offset, src_len);
+	    return -1;
+	}
+	dst->pixelformat &= 0xFFFF;
+    }
+
+    if (src_fd)
+	flush_img(src, srcf, src_offset, src_len);
+
+    if (dst_fd)
+	flush_img(dst, dstf, dst_offset, dst_len);
+
+    ge_lock(geinfo);
+
+    ge_set_source(geinfo, src);
+    ge_set_destination(geinfo, dst);
+    //ge_set_pixelformat(geinfo, src->pixelformat); //already set in set_destination
+    if (rotate)
+	ge_rotate(geinfo, rotate);
+    else
+	ge_blit(geinfo);
+
+    ge_wait_sync(geinfo);
+    ge_unlock(geinfo);
+
+    if (src_fd)
+	free_img(src, srcf, src_offset, src_len);
+
+    if (dst_fd)
+	free_img(dst, dstf, dst_offset, dst_len);
+
+    return 0;
+}
