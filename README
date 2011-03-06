@@ -1,40 +1,117 @@
-(These are notes about the WM8505 kernel port, please see readme.linux
-for the original linux readme.txt.)
+(These are notes about the WM8505 kernel port, please see README.linux
+for the original Linux kernel README.)
 
 * This is based on kernel 2.6.29 sources released by VIA
   (http://lists.gpl-violations.org/pipermail/legal/2010-July/002204.html).
 
-* The sources currently come with some sourceless binary object files
-  (under via_obj.arm_v5t-2629.01) but we're hoping that will change.
+* You may also want to see http://gitorious.org/linux-on-via-vt8500
+  which is a clean kernel implementation for VT8500/WM8505, written
+  largely from scratch. However, at time of writing the clean kernel
+  supports less WM8505 hardware than this kernel does.
+
+* These sources currently come with one sourceless binary object file
+  (for SD card support.)
+
+* This kernel will not work on VT8500-based machines. WM8505 only.
 
 
 ******** PREREQUISITES ********
 
-- Appropriate ARM cross-compiler toolchain. Make sure it has EABI support.
+- A host running Linux to build from. You may be able to build from
+  BSD/OSX as well, I don't know.
 
-  I've been using Emdebian's toolchain to compile from an Ubuntu host,
-  follow the steps under "Get the Binaries" on emdebian wiki:
-    http://wiki.debian.org/EmdebianToolchain#Getthebinaries
-  (you don't need all those packages listed there to just compile a kernel, 
-  but they don't hurt.) 
+- An appropriate ARM cross-compiler toolchain. Make sure it has EABI support.
 
-******** CONFIG **********
+  Recommended/tested choices are Emdebian for Debian/Ubuntu hosts, or
+  the Android NDK toolchain for other hosts (see below.) Problems have
+  been reported using CodeSourcery.
 
-make menuconfig ARCH=arm
-
-Pre-existing configs are:
-
-* arch/arm/configs/eken_m001_debian
-
-  A current configuration that should be suitable for running debian or other
-  standard Linux distributions.
-
-* arch/arm/configs/eken_m001_android
-
-  This is the config I'm currently using for Android.
+- The mkimage tool installed on your host. On Debian/Ubuntu, the
+  package to install is 'uboot-mkimage'
 
 
-*** OLDER CONFIGS (MAY NOT WORK) ***
+******** INSTALLING A TOOLCHAIN ********
+
+**** Emdebian Option
+
+  To install Emdebian on an Debian or Ubuntu host, follow the steps
+    under "Get the Binaries" on emdebian wiki:
+    http://wiki.debian.org/EmdebianToolchain#Getthebinaries (you don't
+    need all those packages listed there to just compile a kernel, but
+    they don't hurt.)
+
+  Before building, you will need to set an environment variable for
+  your cross-compiler:
+
+    export CROSS_COMPILE=arm-linux-gnueabi-   
+
+  (you can alternately supply this on the command-line to make, if you desire.)
+
+
+**** Android NDK Option
+
+   To install the Android NDK, first download from 
+	http://developer.android.com/sdk/ndk/index.html
+
+	Then untar it to your chosen install point and add the prebuilt 
+   binary toolchain to your path. The steps will be something like:
+	  cd /usr/local
+	  sudo tar jxvf ~/Downloads/android-ndk-r5b-linux-x86.tar.bz2
+     sudo chmod -R +rX android-ndk-r5b/
+     export PATH="$PATH:`pwd`/android-ndk-r5b/toolchains/arm-eabi-4.4.0/prebuilt/linux-x86/bin"
+
+   You will probably want to add the last line above to your .bashrc or
+   similar, so the toolchain is always in your PATH
+
+	You will also need to set the cross-compiler environment variable:
+     
+     export CROSS_COMPILE=arm-eabi-
+
+   (you can alternately supply this on the command-line to make, if you desire.)
+
+
+
+******** CONFIGURE YOUR FIRST KERNEL ********
+
+After you have a toolchain, you can configure a WM8505 kernel with a
+default config (defconfig) as follows:
+
+For Eken M001 kernel suitable for Android:
+
+   make eken_m001_android_defconfig ARCH=arm
+
+For Eken M001 kernel more suitable for Debian:
+
+   make eken_m001_debian_defconfig ARCH=arm
+
+(Other WM8505 tablets/netbooks can probably use the M001 config as well.)
+
+
+******** BUILD YOUR FIRST KERNEL ********
+
+After you have a config, you can build a kernel:
+
+  make via_obj uImage modules ARCH=arm
+
+If compilation succeeds, the kernel image will be at arch/arm/uImage
+(this file is equivalent to the uzImage.bin file used in common WM8505
+boot environments, you can copy it over the top to change the kernel
+which is installed/booted from SD.)
+
+To install the built kernel modules somewhere, run:
+
+  make modules_install ARCH=arm INSTALL_MOD_PATH=/some/staging/path
+
+
+******** FURTHER CONFIGURATION **********
+
+You can edit the current config with
+
+  make menuconfig ARCH=arm
+
+As well as the two recommended defconfigs, there are some older
+configurations available under arch/arm/configs. These are not known
+to work, and are mostly for comparison/information purposes only:
 
 * arch/arm/configs/android_wm8505_config
 * arch/arm/configs/wmt_defconfig
@@ -48,40 +125,33 @@ Pre-existing configs are:
 
 * arch/arm/configs/eken_m001_factory_configuration
   
-  Dump of /proc/config.gz on a factory Eken M001 kernel (different again.)
+  This is a dump of /proc/config.gz on a factory Eken M001 kernel (different again.)
 
 
-******** BUILDING ********
+******** OTHER BUILDING NOTES ********
 
-Two steps to compile:
+* The via_obj target is a custom VIA target to copy the mmc_atsmb.o
+  file into the source tree before building. VIA/Wondermedia have not
+  released this one source file.
 
+* If you are building for Android, and you want to use some of the
+  binary-only kernel modules that came with WM8505 Android by default,
+  then you need to force the kernel revision so they will load. This
+  is a horrible hack, but even WM seem to do it in their Android
+  releases.
 
-  make via_obj
-
-(Copies the binary blob .os in to place)
-
-  make ubin modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-
-
-This builds a uzImage.bin for uboot. Replace CROSS_COMPILE with your
-cross-compiler as appropriate.
-
-
-NB: If you are building for Android, and you want to use some of the
-binary-only kernel modules that came with Android, then you need to
-force the kernel revision (horrible, but even WM seem to do it in
-their Android releases):
-
-make ubin modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty
+  Do this by setting KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty as an
+  environment variable, ie:
+	
+  make uImage modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty
 
 
-To install the modules somewhere:
+**** u-boot scripts
 
-  make modules_install ARCH=arm INSTALL_MOD_PATH=/some/staging/path
+U-boot boot scripts for SD card booting/installing are saved at the path
+'script/scriptcmd' on SD card.
 
-
-******* u-boot script ******
-
-U-boot script saved in 'script/scriptcmd' on SD card. To read a scriptcmd:
+To read a scriptcmd:
 
   tail -c +72 scriptcmd
 
@@ -89,7 +159,7 @@ To write a scriptcmd:
 
 	mkimage -A arm -O linux -T script -C none -a 1 -e 0 -n "script image" -d cmd scriptcmd
 
-(Where 'cmd' is your source scriptcmd script)
+(Where 'cmd' is your source scriptcmd script.)
 
 
 ******* kernel arguments ******
@@ -104,7 +174,10 @@ Relevant args:
   is also mem=109M on non-Android boots. Suspect extra 3M is video memory?!?
 
 * console=ttyS0,115200n 
-  gives you kernel console on serial
+  gives you kernel console on serial. If you're building for Debian or
+  any other non-Android userland then you may want to remove this, and enable
+  framebuffer console in configuration (this is enabled already in Debian 
+  defconfig.)
 
 * lcdid=1 enables VOUT to LCD on tablets. Some other machines
   (netbooks?) use VT1632 which is the default if lcdid is not set (in
@@ -118,9 +191,10 @@ This tree contains the rt2870sta kernel module, backported from kernel
 2.6.35. I have had mixed success with this driver, you may also want
 to try Ralink's OEM source release driver (especially on Android.) 
 
-However, here are the steps for rt2870sta:
-
-To use this module, you will need to do two additional things:
+The WiFi driver that ships with WM8505 Android is a custom one with
+vendor-specific patches to enable the GPIO and load the firmware. If
+you go with a standard driver, you will need to perform these
+functions yourself:
 
 - Run these commands to turn on the Signal GPIO that powers the USB
   stick inside the Eken. We'll probably come up with something better
@@ -130,9 +204,6 @@ To use this module, you will need to do two additional things:
   echo 1 > /sys/class/gpio/gpio2/value
   modprobe rt2870sta
 
-  (NB: This means you can also power down the whole Wifi stick from 
-  userspace to save battery, if you want, by writing 0 to /value.)  
-
 
 - Install a firmware file. To get a firmware file in debian, you
   can install firmware-ralink from non-free. Alternatively, download
@@ -140,9 +211,11 @@ To use this module, you will need to do two additional things:
 
   The rt2870.bin firmware will do as long as it's recent.
 
-  The easiest way to get the firmware to load is to compile it
-  directly into the kernel (under Device Drivers -> Generic Driver
-  Options -> Include in-kernel firmware blobs...)
+  You can choose to load the firmware at runtime, or to compile it
+  directly into the kernel. Choosing to compile it in is currently the
+  path of least resistance for most userlands (look in menuconfig
+  under (under Device Drivers -> Generic Driver Options -> Include
+  in-kernel firmware blobs...)
 
 
   

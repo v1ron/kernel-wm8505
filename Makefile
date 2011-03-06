@@ -191,7 +191,6 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 export KBUILD_BUILDHOST := $(SUBARCH)
 ARCH		?= arm
-CROSS_COMPILE	?= arm_v5t_le-
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -1590,8 +1589,6 @@ FORCE:
 # Declare the contents of the .PHONY variable as phony.  We keep that
 # information in a variable se we can use it in if_changed and friends.
 .PHONY: $(PHONY)
-ubin: _all
-	mkimage -A arm -O linux -T kernel -C none -a 0x8000 -e 0x8000 -n "MontaVista Linux 2.6.10" -d arch/arm/boot/zImage uzImage.bin
 
 ####################################################The follows for releasing bsp###################################
 .PHONY: make_bsp via_obj via_src
