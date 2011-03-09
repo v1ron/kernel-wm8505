@@ -135,14 +135,14 @@ to work, and are mostly for comparison/information purposes only:
   released this one source file.
 
 * If you are building for Android, and you want to use some of the
-  binary-only kernel modules that came with WM8505 Android by default,
-  then you need to force the kernel revision so they will load. This
-  is a horrible hack, but even WM seem to do it in their Android
-  releases.
+  binary-only kernel modules that came with WM8505 Android by default
+  (or vice-versa if you want to use a new module with an old kernel),
+  then you need to force the kernel revision so they will load. This is
+  a horrible hack, but even WM seem to do it in their Android releases.
 
-  Do this by setting KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty as an
-  environment variable, ie:
-	
+  Do this by overriding the KERNELRELEASE make variable on the command line
+  as KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty - ie:
+
   make uImage modules ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- KERNELRELEASE=2.6.29-00236-g4f8dbbb-dirty
 
 
