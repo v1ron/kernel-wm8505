@@ -54,7 +54,6 @@ WonderMedia Technologies, Inc.
 #include "ge_accel.h"
 #include "vpp.h"
 
-
 #ifdef DEBUG
 #define DPRINTK(fmt, args...) \
 	printk(KERN_WARN "%s: " fmt, __func__ , ## args)
@@ -67,6 +66,8 @@ WonderMedia Technologies, Inc.
 #define ENTER()
 #define LEAVE()
 #endif
+
+//#define USE_OLD_FLIP
 
 DECLARE_WAIT_QUEUE_HEAD(ge_wq);
 static ge_info_t *geinfo;
@@ -832,8 +833,8 @@ void ge_simple_blit(unsigned int phy_src, unsigned int phy_dst,
 		d.pixelformat = GEPF_LUT8;
 		break;
 	case 16:
-		s.pixelformat = GEPF_RGB16;
-		d.pixelformat = GEPF_RGB16;
+	   s.pixelformat = GEPF_RGB16;
+	   d.pixelformat = GEPF_RGB16;
 		break;
 	case 32:
 		s.pixelformat = GEPF_RGB32;
@@ -901,55 +902,66 @@ int ge_stretch_blit(ge_surface_t * src, ge_surface_t * dst, int rotate)
     unsigned int src_offset=0;
     unsigned int dst_offset=0;
 
+	 if(rotate) 
+	 {
+		printk("Unsupported blit rotation request\n");
+		return -1;
+	 }
+	 if(src->xres != dst->xres || src->yres != dst->yres)
+	 {
+		printk("Unsupported blit scale request\n");
+		return -1;
+	 }
+
     int src_fd = src->pixelformat >> 16;
     if (src_fd) // FIXME: hack
     {
-	src_offset = src->addr;
-	if (get_img(src_fd, src, &srcf, &src_len) < 0)
-	{
-	    printk("Not resolved srt pmem file\n");
-	    return -1;
-	}
-	src->pixelformat &= 0xFFFF;
+		src_offset = src->addr;
+		if (get_img(src_fd, src, &srcf, &src_len) < 0)
+		{
+		  printk("Not resolved srt pmem file\n");
+		  return -1;
+		}
+		src->pixelformat &= 0xFFFF;
     }
     int dst_fd = src->pixelformat >> 16;
     if (dst_fd) // FIXME: hack
-    {
-	dst_offset = dst->addr;
-	if (get_img(dst_fd, dst, &dstf, &dst_len) < 0)
-	{
-	    printk("Not resolved dst pmem file\n");
-	    if (src_fd)
-		free_img(src, srcf, src_offset, src_len);
-	    return -1;
-	}
-	dst->pixelformat &= 0xFFFF;
-    }
+	 {
+		dst_offset = dst->addr;
+		if (get_img(dst_fd, dst, &dstf, &dst_len) < 0)
+		{
+		  printk("Not resolved dst pmem file\n");
+		  if (src_fd)
+			 free_img(src, srcf, src_offset, src_len);
+		  return -1;
+		}
+		dst->pixelformat &= 0xFFFF;
+	 }
 
     if (src_fd)
-	flush_img(src, srcf, src_offset, src_len);
-
+		flush_img(src, srcf, src_offset, src_len);
+	 
     if (dst_fd)
-	flush_img(dst, dstf, dst_offset, dst_len);
+		flush_img(dst, dstf, dst_offset, dst_len);
 
     ge_lock(geinfo);
-
+	 
     ge_set_source(geinfo, src);
     ge_set_destination(geinfo, dst);
     //ge_set_pixelformat(geinfo, src->pixelformat); //already set in set_destination
     if (rotate)
-	ge_rotate(geinfo, rotate);
+		ge_rotate(geinfo, rotate);
     else
-	ge_blit(geinfo);
+		ge_blit(geinfo);
 
     ge_wait_sync(geinfo);
     ge_unlock(geinfo);
 
     if (src_fd)
-	free_img(src, srcf, src_offset, src_len);
+		free_img(src, srcf, src_offset, src_len);
 
     if (dst_fd)
-	free_img(dst, dstf, dst_offset, dst_len);
+		free_img(dst, dstf, dst_offset, dst_len);
 
     return 0;
 }
