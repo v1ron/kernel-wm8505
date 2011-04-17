@@ -1063,13 +1063,13 @@ finish_out_dma(struct vt8500_ep *ep, struct vt8500_req *req, int status)
 		/*dump_bulk_buffer(req->req.buf, req->req.actual);*/
 		#endif
 
-		if ((req->req.length == 1600) || (req->req.length == 2048)) {/*F.S. [1600]  : H.S. [2048]*/
+		//if ((req->req.length == 1600) || (req->req.length == 2048)) {/*F.S. [1600]  : H.S. [2048]*/
 			/*ex : 512 /64 = 8  8 % 2 = 0*/
 			temp32 = (req->req.actual + ep->maxpacket - 1) / ep->maxpacket;
 			ep->toggle_bit = ((temp32 + ep->toggle_bit) % 2);
-		} else
-			INFO("Different Length for Bulk Out (%08d) Toggle Bit would Error\n"
-				, req->req.length);
+		//} else
+		//	INFO("Different Length for Bulk Out (%08d) Toggle Bit would Error\n"
+		//		, req->req.length);
 	} else {
 		/*GigaHsu-B 2008.5.15 : Add this caculate toggle from next_out_dma() :
 			fixed sideshow gadget issue.*/
