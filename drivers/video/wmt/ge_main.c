@@ -283,7 +283,7 @@ static int gefb_ioctl(struct fb_info *info, unsigned int cmd,
 
 int gefb_hw_cursor(struct fb_info *info, struct fb_cursor *cursor)
 {
-	return 0;
+	return -EINVAL; // force soft_cursor()
 }
 
 int gefb_sync(struct fb_info *info)
