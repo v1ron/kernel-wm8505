@@ -61,6 +61,7 @@ WonderMedia Technologies, Inc.
 #include <linux/sched.h>
 
 #include "ge_accel.h"
+#include "vpp.h"
 
 #ifndef FBIO_WAITFORVSYNC
 #define FBIO_WAITFORVSYNC _IOW('F', 0x20, u_int32_t)
@@ -376,8 +377,15 @@ static int __init gefb_probe(struct platform_device *pdev)
 		case 0x3426:
 		case 0x3437:
 		default:
-			info->fix.smem_len = 0x300000;
-			info->fix.smem_start = ge_vram_addr(3);
+            if (SCC_CHIP_ID == 0x34260103) {   // revID as used in WM8505
+                info->fix.smem_start = vppif_reg32_in(REG_GOVRH_YSA);   // FB addr
+                // should be correct but too lazy to debug why it is wrong:
+                //info->fix.smem_len = (num_physpages << PAGE_SHIFT) - info->fix.smem_start;
+                info->fix.smem_len = 0x600000;
+            } else {
+			    info->fix.smem_len = 0x300000;
+			    info->fix.smem_start = ge_vram_addr(3);
+            }
 		}
 	}
 
