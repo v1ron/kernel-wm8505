@@ -39,6 +39,7 @@ MODULE_VERSION(STA_DRIVER_VERSION);
 /* module table */
 struct usb_device_id rtusb_usb_id[] = {
 #ifdef RT2870
+	{USB_DEVICE(0x148F, 0x2070)},	/* Ralink */
 	{USB_DEVICE(0x148F, 0x2770)},	/* Ralink */
 	{USB_DEVICE(0x148F, 0x2870)},	/* Ralink */
 	{USB_DEVICE(0x07B8, 0x2870)},	/* AboCom */

@@ -2009,7 +2009,7 @@ void NICUpdateFifoStaCounters(struct rt_rtmp_adapter *pAd)
 			pEntry->OneSecTxFailCount++;
 
 			if (pEntry->FIFOCount >= 1) {
-				DBGPRINT(RT_DEBUG_TRACE, ("#"));
+				//DBGPRINT(RT_DEBUG_TRACE, ("#"));
 				pEntry->NoBADataCountDown = 64;
 
 				if (pEntry->PsMode == PWR_ACTIVE) {
