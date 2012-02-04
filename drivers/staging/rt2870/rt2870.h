@@ -85,6 +85,7 @@
 
 #define RT2870_USB_DEVICES	\
 {	\
+	{USB_DEVICE(0x148F,0x2070)}, /* Ralink */		\
 	{USB_DEVICE(0x148F,0x2770)}, /* Ralink */		\
 	{USB_DEVICE(0x148F,0x2870)}, /* Ralink */		\
 	{USB_DEVICE(0x148F,0x3070)}, /* Ralink */		\

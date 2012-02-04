@@ -14,6 +14,12 @@ WonderMedia Technologies, Inc.
 
 --*/
 
+/* *shudder* */
+#include "../../char/wmt-pwm.h"
+
+// #including "govrh.h" makes a huge mess
+extern void govrh_suspend(int);
+extern void govrh_resume(int);
 
 /**
  * viaGL API reference
@@ -558,9 +564,10 @@ int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 int ge_blank(int mode, struct fb_info *info)
 {
 	volatile struct ge_regs_8430 *regs;
+    int i;
 
 	/* Disable FB_BLANK due to the buggy VT8430 APM. */
-	return 0;
+//	return 0;
 
 	ge_wait_sync(geinfo);
 
@@ -576,12 +583,18 @@ int ge_blank(int mode, struct fb_info *info)
 		regs->g1_amx_en = 0;	/* G1 AMX disable */
 		regs->g2_amx_en = 0;	/* G2 AMX disable */
 		regs->ge_reg_upd = 1;	/* register update */
+        pwm_set_enable(0,0);
+        for (i=0; i<3; i++)
+            govrh_suspend(i);
 		break;
 	case FB_BLANK_UNBLANK:
+        for (i=0; i<3; i++)
+            govrh_resume(i);
 		regs->g1_amx_en = 1;	/* G1 AMX enable */
 		regs->ge_reg_upd = 1;	/* register update */
 
 		REG_SET32(0xd8050308, 0x00000001); /* Turn on GE by GOV */
+        pwm_set_enable(0,1);
 		break;
 	default:
 		break;

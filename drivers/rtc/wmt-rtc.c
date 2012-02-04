@@ -309,7 +309,7 @@ static int wmt_rtc_open(struct device *dev)
 		wmt_rtc_interrupt,
 		IRQF_DISABLED,
 		"rtc_ticks",
-		NULL);
+		dev);
 	if (ret) {
 		printk(KERN_ERR "rtc: IRQ%d already in use.\n", IRQ_RTC_UPDATE);
 		goto fail_update;
@@ -319,7 +319,7 @@ static int wmt_rtc_open(struct device *dev)
 		wmt_rtc_interrupt,
 		IRQF_DISABLED,
 		"rtc_alarm",
-		NULL);
+		dev);
 	if (ret) {
 		printk(KERN_ERR "rtc: IRQ%d already in use.\n", IRQ_RTC_ALARM);
 		goto fail_alarm;
@@ -328,7 +328,7 @@ static int wmt_rtc_open(struct device *dev)
 	return 0;
 
 fail_alarm:
-	free_irq(IRQ_RTC_UPDATE, NULL);
+	free_irq(IRQ_RTC_UPDATE, dev);
 fail_update:
 	return ret;
 }
@@ -349,9 +349,12 @@ static void wmt_rtc_release(struct device *dev)
 	/*
 	 * Release IRQ resource.
 	 */
-	free_irq(IRQ_RTC_UPDATE, NULL);
-	free_irq(IRQ_RTC_ALARM, NULL);
+	free_irq(IRQ_RTC_UPDATE, dev);
+	free_irq(IRQ_RTC_ALARM, dev);
 }
+
+static int wmt_rtc_read_time(struct device *dev, struct rtc_time *tm);
+static int wmt_rtc_set_time(struct device *dev, struct rtc_time *tm);
 
 static int wmt_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 {
@@ -396,6 +399,10 @@ static int wmt_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long arg
 		rtc.regs->RTCC |= RTCC_INTENA;
 		spin_unlock_irq(&rtc_lock);
 		return 0;
+    case RTC_RD_TIME:
+        return wmt_rtc_read_time(dev, (struct rtc_time *)arg);
+    case RTC_SET_TIME:
+        return wmt_rtc_set_time(dev, (struct rtc_time *)arg);
 
 	/*
 	 * Current RTC driver does not support following ioctls

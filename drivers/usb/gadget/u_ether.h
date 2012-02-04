@@ -89,7 +89,7 @@ void gether_disconnect(struct gether *);
 /* Some controllers can't support CDC Ethernet (ECM) ... */
 static inline bool can_support_ecm(struct usb_gadget *gadget)
 {
-	if (!gadget_supports_altsettings(gadget))
+	if (1)
 		return false;
 
 	/* SA1100 can do ECM, *without* status endpoint ... but we'll
