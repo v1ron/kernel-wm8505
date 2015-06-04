@@ -267,7 +267,6 @@
 #define RFIFO_TLC_MASK                  0xFFFF0000
 #define RFIFO_TRC_MASK                  0x0000FFFF
 
-#if 0
 struct i2s_regs_s {
 	volatile unsigned int AUDCTLCR;	/* [Rx00-03] Audio Controller Control Reigster*/
 	volatile unsigned int AUDDFCR;	/* [Rx04-07] Audio Data Format Control Register*/
@@ -404,5 +403,5 @@ extern void i2s_set_rx_resolution(unsigned int resolution);
 extern void i2s_set_tx_resolution(unsigned int resolution);
 extern void i2s_set_rx_channels(unsigned int channel);
 extern void i2s_set_tx_channels(unsigned int channel);
-#endif 
+
 #endif /* __WMT_I2S_H */

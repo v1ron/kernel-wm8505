@@ -25,7 +25,7 @@
 #include <sound/core.h>
 
 
-
+#if 0
 struct i2s_regs_s {
 	volatile unsigned int AUDCTLCR;	/* [Rx00-03] Audio Controller Control Reigster*/
 	volatile unsigned int AUDDFCR;	/* [Rx04-07] Audio Data Format Control Register*/
@@ -114,6 +114,7 @@ struct i2s_codec_s {
 	unsigned int    irq;
 	unsigned int 	recsrc;
 };
+#endif
 
 
 
@@ -147,7 +148,7 @@ struct wmt_alsa_codec_config {
 #define DIGITAL_ACTIVATION_ADDR        0x9
 #define RESET_ADDR                     0xF
 
-struct codec_shadow_regs_s {
+/*struct codec_shadow_regs_s {
 	unsigned int line_left_volume_sreg ;
 	unsigned int line_right_volume_sreg ;
 	unsigned int headphone_left_volume_sreg ;
@@ -158,29 +159,29 @@ struct codec_shadow_regs_s {
 	unsigned int digital_format_sreg ;
 	unsigned int sample_rate_control_sreg ;
 	unsigned int digital_activation_sreg ;
-};
+};*/
 
-struct codec_shadow_s {
+/*struct codec_shadow_s {
 	int ref;
 	int spi_no  ;
 	unsigned int  using_sample_rate ;
 	int clock_out_half  ;
 	struct codec_shadow_regs_s sreg ;
-};
+};*/
 
 #define CODEC_POWER_ON 0x0001
 #define CODEC_POWER_OFF 0x0000
 
-void i2s_suspend(void);
-void i2s_resume(void);
-extern struct i2s_codec_s *i2s_codec_attach(void);
-extern void i2s_codec_detach(struct i2s_codec_s *codec);
-extern void i2s_sample_rate(unsigned int rate);
-extern void i2s_rx_sample_rate(unsigned int rate);
-extern void i2s_set_rx_resolution(unsigned int resolution);
-extern void i2s_set_tx_resolution(unsigned int resolution);
-extern void i2s_set_rx_channels(unsigned int channel);
-extern void i2s_set_tx_channels(unsigned int channel);
+//void i2s_suspend(void);
+//void i2s_resume(void);
+//extern struct i2s_codec_s *i2s_codec_attach(void);
+//extern void i2s_codec_detach(struct i2s_codec_s *codec);
+//extern void i2s_sample_rate(unsigned int rate);
+//extern void i2s_rx_sample_rate(unsigned int rate);
+//extern void i2s_set_rx_resolution(unsigned int resolution);
+//extern void i2s_set_tx_resolution(unsigned int resolution);
+//extern void i2s_set_rx_channels(unsigned int channel);
+//extern void i2s_set_tx_channels(unsigned int channel);
 
 /*********** Mixer function prototypes *************************/
 int snd_wmt_mixer(void *, struct snd_card *);
