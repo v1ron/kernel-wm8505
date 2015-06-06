@@ -14,4 +14,20 @@ config SND_WMT_I2S
 	  the WMT I2S interface. You will also need to select the audio 
 	  interfaces to support below.
 
+choice
+	prompt "I2S CODEC select"
+	default SND_WMT_I2S_ES8328
 
+config SND_WMT_I2S_ES8328
+	bool "Everest Semiconductor ES8328"
+	help
+	    Everest Semiconductor ES8328 chip. This CODEC is used in
+	    YaZhongX EPC Chinese WM8505 netbook.
+
+config SND_WMT_I2S_VT1602
+	bool "VIA VT1602"
+	help
+	    VIA VT1602. I don't have a machine with this one, this driver
+	    is untested.
+
+endchoice
