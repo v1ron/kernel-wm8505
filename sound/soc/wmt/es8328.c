@@ -26,7 +26,7 @@
 #include <sound/pcm.h>
 #include <sound/initval.h>
 #include <sound/control.h>
-#include "../wmt-alsa.h"
+#include "wmt-alsa-8328.h"
 
 #include <linux/config.h>
 #include <linux/init.h>
@@ -45,7 +45,6 @@
 // global variables
 static unsigned char chip_i2c_address;
 static unsigned char daccontrol;
-static struct i2c_adapter * i2c_dev;
 
 //
 int snd_chip_read_reg_8(unsigned char *buffer);
@@ -117,11 +116,11 @@ int snd_chip_read_reg_8(unsigned char *buffer)
 	msg[0].flags = 0;
 	msg[0].len = 1;
 	msg[0].buf = buffer;
-	status = i2c_transfer(i2c_dev, msg, 1);
+	status = wmt_i2c_xfer_if(msg);
 	if (status < 0) return status;
 	// transaction 2: read data at this address
 	msg[0].flags = I2C_M_RD;
-	return i2c_transfer(i2c_dev, msg, 1);
+	return wmt_i2c_xfer_if(msg);
 }
 
 // Function that writes 8-bit value to chip register, over I2C protocol, with verification
@@ -137,7 +136,7 @@ int snd_chip_write_reg_8(unsigned char index, unsigned char value)
 	msg[0].flags = 0;
 	msg[0].len = 2;
 	msg[0].buf = (char*)&buf;
-	status = i2c_transfer(i2c_dev, msg, 1);
+	status = wmt_i2c_xfer_if(msg);
 	if (status < 0) return status;
 	// transactions 2 & 3 read data
 	// buf[0] already set
@@ -158,7 +157,7 @@ int i2c_test_addr(unsigned char chip_addr)
 	msg[0].flags = 0;
 	msg[0].len = 1;
 	msg[0].buf = (char*)&buf;
-	return i2c_transfer(i2c_dev, msg, 1);
+	return wmt_i2c_xfer_if(msg);
 }
 
 /* this function prepares sound chip for playback and returns clock ratios and divisors for i2s bus,
@@ -376,16 +375,8 @@ int snd_chip_resume(void)
 }
 
 // chip initialization. Top-level code may call init\exit dynamically.
-int snd_chip_startup(struct snd_card *card)
+int  snd_chip_startup(struct snd_card *card)
 {
-	static struct ES8328_CONTROL_FUNC chip_func;
-	chip_func.snd_chip_read_reg_8 = snd_chip_read_reg_8;
-	chip_func.snd_chip_write_reg_8 = snd_chip_write_reg_8;
-	// retrieve device handle (Oroginal WMT's i2c driver has been modified).
-	// wmt_i2c_xfer_if does not return any error codes, and this is bad in my case...
-	// wmt_i2c_xfer_if uses i2c_transfer. I simply use i2c_transfer directry, without wmt's functions,
-	// and have error codes...
-	i2c_dev = wmt_i2c_dev();
 	// check which address on i2c bus is used by chip.
 	// if both 10000 and 10001 is not used, then this system does not have es8328...
 	// this chip supports special address selector, which depends on shorting two pins on PCB.
@@ -394,19 +385,19 @@ int snd_chip_startup(struct snd_card *card)
 	if (i2c_test_addr(es8328_i2c_addr1) > 0)
 	{
 		chip_i2c_address = es8328_i2c_addr1;
+		snd_wmt_mixer(NULL, card);
+		printk("es8328: snd_chip_startup(): chip found at address 1\n");
+		return 0;
 	}
 	if (i2c_test_addr(es8328_i2c_addr2) > 0)
 	{
 		chip_i2c_address = es8328_i2c_addr2;
+		snd_wmt_mixer(NULL, card);
+		printk("es8328: snd_chip_startup(): chip found at address 2\n");
+		return 0;
 	}
-	if (chip_i2c_address > 0)
-	{
-		// for identify chip, we may use registers default values.  In future
-		/* Chip found */
-		// initialize mixer
-		return snd_controls_new(card, &chip_func);
-		
-	}
+
+	printk("es8328: snd_chip_startup(): -ENODEV\n");
 	return -ENODEV;
 }
 

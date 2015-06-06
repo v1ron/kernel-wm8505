@@ -33,7 +33,7 @@ Audio data is transmitted over 5-wire I2S interface.
 
 */
 
-#include "es8328_ctrl.h"
+#include "wmt-8328-mixer.h"
 
 #ifndef _ES8328_H_
 #define _ES8328_H_
@@ -342,11 +342,6 @@ static DECLARE_WAIT_QUEUE_HEAD(codec_wq);
 // Import
 //---------------------------------------------------------
 
-// this function is needed for transfer operations over i2c bus
-extern struct i2c_adapter * wmt_i2c_dev(void);
-
-// initialization of mixer
-extern int snd_controls_new(struct snd_card *card, struct ES8328_CONTROL_FUNC *func);
-extern void snd_controls_delete(void);
+extern int wmt_i2c_xfer_if(struct i2c_msg *msg);
 
 #endif

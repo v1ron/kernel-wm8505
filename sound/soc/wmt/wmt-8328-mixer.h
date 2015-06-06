@@ -47,8 +47,4 @@
 #include <linux/spinlock.h>
 #include <sound/control.h>
 
-struct ES8328_CONTROL_FUNC
-{
-	int (*snd_chip_read_reg_8)(unsigned char *buffer);
-	int (*snd_chip_write_reg_8)(unsigned char index, unsigned char value);
-};
+int snd_wmt_mixer(void *chip, struct snd_card *card);
