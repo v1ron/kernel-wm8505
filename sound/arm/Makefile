@@ -17,7 +17,3 @@ snd-pxa2xx-lib-$(CONFIG_SND_PXA2XX_LIB_AC97)	+= pxa2xx-ac97-lib.o
 
 obj-$(CONFIG_SND_PXA2XX_AC97)	+= snd-pxa2xx-ac97.o
 snd-pxa2xx-ac97-objs		:= pxa2xx-ac97.o
-obj-$(CONFIG_SOUND_WMT_I2S) += wmt_i2s.o i2s.o wmt_swmixer.o
-obj-$(CONFIG_I2S_Codec_VT1602) += vt1602.o 
-obj-$(CONFIG_SOUND_WMT_AC97)         += wmt_ac97.o 
-obj-$(CONFIG_WMT_VT1613)		+= vt1613_generic.o ac97_vt1613.o
