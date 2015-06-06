@@ -254,21 +254,21 @@ void i2c_api_page_write(int index, u8 data[], int count)
 * RETURNS: 
 * 
 */
-void wmt_i2c_xfer_if(struct i2c_msg *msg)
+int wmt_i2c_xfer_if(struct i2c_msg *msg)
 {
 	int  ret;
 
 	if( i2c_api_client == NULL ) {		
 		DPRINTK("[%s] i2c_api_client is NULL \n", __func__);
-		return ;
+		return -EIO;
 	}
 	ret = i2c_transfer(i2c_api_client->adapter, msg, 1);
-	if (ret != 1) {
+	if (ret < 0) {
 		DPRINTK("[%s] fail \n", __func__);
-		return ;
+		return ret;
 	}
 	DPRINTK("[%s] OK! \n", __func__);
-	return ;
+	return ret;
 
 }
 
