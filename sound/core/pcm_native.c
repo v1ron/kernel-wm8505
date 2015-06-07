@@ -1781,10 +1781,11 @@ int snd_pcm_hw_constraints_init(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_pcm_hw_constraints *constrs = &runtime->hw_constraints;
 	int k, err;
-
+/*
 	for (k = SNDRV_PCM_HW_PARAM_FIRST_MASK; k <= SNDRV_PCM_HW_PARAM_LAST_MASK; k++) {
 		snd_mask_any(constrs_mask(constrs, k));
-	}
+	}*/// ALSA crash here on playback/capture on ARM. Do a quick fix. 
+	memset(&constrs->masks[0], 0xff, sizeof(constrs->masks));
 
 	for (k = SNDRV_PCM_HW_PARAM_FIRST_INTERVAL; k <= SNDRV_PCM_HW_PARAM_LAST_INTERVAL; k++) {
 		snd_interval_any(constrs_interval(constrs, k));
