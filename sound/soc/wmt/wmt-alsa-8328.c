@@ -47,6 +47,12 @@
 
 #include "wmt-alsa-8328.h"
 
+#ifdef DEBUG
+#define DPRINTK(fmt, args...)   printk("%s: " fmt, __FUNCTION__ , ## args)
+#else
+#define DPRINTK(fmt, args...)
+#endif
+
 static void i2s_audio_dma_tx_callback(void *data);
 static void i2s_audio_dma_rx_callback(void *data);
 
@@ -98,8 +104,9 @@ static struct snd_pcm_hardware snd_es8328_capture_hw = {
 /* playback open callback */
 static int snd_es8328_playback_open(struct snd_pcm_substream *substream)
 {
-	printk("ES8328 playback open\n");
 	int status;
+
+	DPRINTK("ES8328: end_es8328_playback_open()\n");
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
 	substream->private_data = card->private_data;
 	substream->runtime->hw = snd_es8328_playback_hw;
@@ -119,6 +126,7 @@ static int snd_es8328_playback_open(struct snd_pcm_substream *substream)
 static int snd_es8328_playback_close(struct snd_pcm_substream *substream)
 {
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
+	DPRINTK("ES8328: end_es8328_playback_close()\n");
 	// free DMA channel for future use
 	wmt_free_dma(pd->dmach_tx);
 	pd->pss = NULL;
@@ -131,6 +139,8 @@ static int snd_es8328_capture_open(struct snd_pcm_substream *substream)
 {
 	int status;	
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
+
+	DPRINTK("ES8328: end_es8328_capture_open()\n");
 	substream->private_data = card->private_data;
 	substream->runtime->hw = snd_es8328_capture_hw;
 
@@ -150,6 +160,8 @@ static int snd_es8328_capture_open(struct snd_pcm_substream *substream)
 static int snd_es8328_capture_close(struct snd_pcm_substream *substream)
 {
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
+
+	DPRINTK("ES8328: end_es8328_capture_close()\n");
 	// free DMA channel for future use
 	wmt_free_dma(pd->dmach_rx);
 	pd->css = NULL;
@@ -162,7 +174,7 @@ static int snd_es8328_capture_close(struct snd_pcm_substream *substream)
 static int snd_es8328_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *hw_params)
 {
-	printk("ES8328 hw params\n");
+	DPRINTK("ES8328: end_es8328_pcm_hw_params()\n");
 	// allocation of DMA buffer (if this buffer is not already allocated)
 	return snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
 }
@@ -170,12 +182,13 @@ static int snd_es8328_pcm_hw_params(struct snd_pcm_substream *substream,
 /* hw_free callback */
 static int snd_es8328_pcm_hw_free(struct snd_pcm_substream *substream)
 {
+	DPRINTK("ES8328: end_es8328_pcm_hw_free()\n");
         return snd_pcm_lib_free_pages(substream);
 }
 
 static int wmt_i2s_set_clocks(int sysclk, int sysclkdiv, int mclkdiv, int bclkdiv, int lrclkdiv)
 {
-	printk("ES8328 set clocks\n");
+	DPRINTK("ES8328: wmt_i2s_set_clocks()\n");
 	// setting clock rates for i2s bus
 	// 16-bit modes!
 	// SYSCLK: bit 20:18
@@ -201,8 +214,9 @@ static int wmt_i2s_set_clocks(int sysclk, int sysclkdiv, int mclkdiv, int bclkdi
 /* prepare callback */
 static int snd_es8328_pcm_prepare(struct snd_pcm_substream *substream)
 {
-	printk("ES8328 pcm prepare\n");
 	int sysclk, sysclkdiv, mclkdiv, bclkdiv, lrclkdiv, status;
+
+	DPRINTK("ES8328: end_es8328_pcm_prepare()\n");
 	// setting of chip DAC rate and retrieving i2s clocks
 	if (substream->pstr->stream == SNDRV_PCM_STREAM_PLAYBACK)
 	{
@@ -229,10 +243,11 @@ static int snd_es8328_pcm_prepare(struct snd_pcm_substream *substream)
 /* trigger callback */
 static int snd_es8328_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
-	printk("ES8328 pcm trigger\n");
 	int status;
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
+
 	pd->playback_buf_dev_pos = 0;
+	DPRINTK("ES8328: end_es8328_pcm_trigger()\n");
 	if (substream->pstr->stream == SNDRV_PCM_STREAM_PLAYBACK)
 	{
 		if (cmd == SNDRV_PCM_TRIGGER_START)
@@ -317,10 +332,9 @@ static int snd_es8328_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 }
 
 /* pointer callback */
-static snd_pcm_uframes_t
-snd_es8328_pcm_pointer(struct snd_pcm_substream *substream)
+static snd_pcm_uframes_t snd_es8328_pcm_pointer(struct snd_pcm_substream *substream)
 {
-	printk("ES8328 pcm pointer\n");
+	DPRINTK("ES8328: end_es8328_pcm_pointer()\n");
         snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
 
         /* get the current hardware pointer */
@@ -369,17 +383,18 @@ static struct snd_pcm_ops snd_es8328_capture_ops = {
 /* DMA callback (called by WMT's DMA handlers) */
 static void i2s_audio_dma_tx_callback(void *data)
 {
-	printk("ES8328 DMA tx\n");
 	int status;
 	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)data;
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
-	
+
+	DPRINTK("ES8328: i2s_audio_dma_tx_callback()\n");
 	// increase "hardware buffer" by count of bytes transmitted
 	pd->playback_buf_dev_pos += I2S_BLOCK_SIZE;	
 	if (pd->playback_buf_dev_pos >= substream->runtime->dma_bytes)
 	{
 		pd->playback_buf_dev_pos = 0;
 	}
+
 	// send new portion of audio data to DMA
 	status = wmt_start_dma(pd->dmach_tx, 
 		(dma_addr_t)__virt_to_phys(substream->runtime->dma_area) + pd->playback_buf_dev_pos, 
@@ -395,11 +410,11 @@ static void i2s_audio_dma_tx_callback(void *data)
 /* DMA callback (called by WMT's DMA handlers) */
 static void i2s_audio_dma_rx_callback(void *data)
 {
-	printk("ES8328 DMA rx\n");
 	int status;
 	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)data;
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
-	
+
+	DPRINTK("ES8328: i2s_audio_dma_rx_callback()\n");
 	// increase "hardware buffer" by count of bytes transmitted
 	pd->capture_buf_dev_pos += I2S_BLOCK_SIZE;	
 	if (pd->capture_buf_dev_pos >= substream->runtime->dma_bytes)
