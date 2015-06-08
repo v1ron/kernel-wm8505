@@ -217,5 +217,21 @@ functions yourself:
   under (under Device Drivers -> Generic Driver Options -> Include
   in-kernel firmware blobs...)
 
+****** ES8328 sound driver ******
 
-  
+There is ES8328 CODEC driver ported along with custom (and ugly) I2S engine.
+Not it is possible to chose between VT1602 with WMT engine and ES8328 with
+custom engine that will be compiled automatically. I was lazy to make ES8328
+compatible with the existing engine, since it is not Mainline. The ES8328
+and engine were my first drivers developed in early 2011. These have been
+ported in 2015 to the ProjectGus kernel and uploaded to Github.
+
+To select codec, use menuconfig at the following path:
+  Device Drivers > Sound Card Support > ALSA >
+  ALSA for SoC > I2S Audio for the WMT chip > I2S Codec select
+
+Please do not compile this as a module :)
+
+Roman
+
+****** ******
