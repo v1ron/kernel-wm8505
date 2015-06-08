@@ -106,8 +106,9 @@ static int snd_es8328_playback_open(struct snd_pcm_substream *substream)
 {
 	int status;
 
-	DPRINTK("ES8328: end_es8328_playback_open()\n");
 	snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
+
+	DPRINTK("ES8328: end_es8328_playback_open()\n");
 	substream->private_data = card->private_data;
 	substream->runtime->hw = snd_es8328_playback_hw;
 
@@ -334,9 +335,9 @@ static int snd_es8328_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 /* pointer callback */
 static snd_pcm_uframes_t snd_es8328_pcm_pointer(struct snd_pcm_substream *substream)
 {
-	DPRINTK("ES8328: end_es8328_pcm_pointer()\n");
         snd_i2s_private_data *pd = snd_pcm_substream_chip(substream);
 
+	DPRINTK("ES8328: end_es8328_pcm_pointer()\n");
         /* get the current hardware pointer */
 	if (substream->pstr->stream == SNDRV_PCM_STREAM_PLAYBACK)
 	{
